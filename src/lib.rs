@@ -1,3 +1,3 @@
 pub mod book;
 
-pub use book::model::{BasicInfo, BasicInfoResult, BookMessage, BookMessageV2};
+pub use book::models::{BasicInfo, BasicInfoResult, BookMessage};

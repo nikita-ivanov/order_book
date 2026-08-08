@@ -36,47 +36,47 @@ impl BasicInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BookMessage {
-    channel: String,
-    r#type: String,
-    data: [BookData; 1],
+    pub channel: String,
+    pub r#type: String,
+    pub data: [BookData; 1],
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BookData {
-    symbol: String,
-    bids: Vec<Quote>,
-    asks: Vec<Quote>,
-    checksum: u32,
-    timestamp: DateTime<Utc>,
+    pub symbol: String,
+    pub bids: Vec<Quote>,
+    pub asks: Vec<Quote>,
+    pub checksum: u32,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Quote {
-    price: f64,
-    qty: f64,
+    pub price: f64,
+    pub qty: f64,
 }
 
 // below do are not really needed since they are essentially the same models
-#[derive(Serialize, Deserialize, Debug)]
-pub struct BookSnapshot {
-    channel: String,
-    r#type: String,
-    symbol: String,
-    bids: Vec<Quote>,
-    asks: Vec<Quote>,
-}
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct BookSnapshot {
+//     channel: String,
+//     r#type: String,
+//     symbol: String,
+//     bids: Vec<Quote>,
+//     asks: Vec<Quote>,
+// }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct BookUpdate {
-    channel: String,
-    r#type: String,
-    symbol: String,
-    bid: Quote,
-    ask: Quote,
-}
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct BookUpdate {
+//     channel: String,
+//     r#type: String,
+//     symbol: String,
+//     bid: Quote,
+//     ask: Quote,
+// }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum BookMessageV2 {
-    Snapshot(BookSnapshot),
-    Update(BookUpdate),
-}
+// #[derive(Serialize, Deserialize, Debug)]
+// pub enum BookMessageV2 {
+//     Snapshot(BookSnapshot),
+//     Update(BookUpdate),
+// }

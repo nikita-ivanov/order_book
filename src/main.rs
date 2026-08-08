@@ -3,7 +3,7 @@ use futures_util::{
     SinkExt, StreamExt,
     stream::{SplitSink, SplitStream},
 };
-use kraken_l3::{BasicInfo, BasicInfoResult, BookMessage};
+use kraken_l3::{BasicInfo, BasicInfoResult, BookMessage, book::order_book::OrderBook};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
@@ -13,9 +13,10 @@ async fn main() -> Result<()> {
     let (mut tx, mut rx) = ws.split();
 
     let symbols = vec![String::from("ETH/USD")];
+    let mut order_book = OrderBook::new(10);
 
     request_channels(&mut tx, symbols).await?;
-    receiving_loop(&mut rx).await?;
+    receiving_loop(&mut rx, &mut order_book).await?;
 
     Ok(())
 }
@@ -45,7 +46,7 @@ async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>) -> Result<
     Ok(())
 }
 
-async fn receiving_loop(rx: &mut Receiver) -> Result<()> {
+async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result<()> {
     // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently
     while let Some(msg) = rx.next().await {
@@ -94,8 +95,12 @@ async fn receiving_loop(rx: &mut Receiver) -> Result<()> {
                 continue;
             }
         };
-        println!("{message:?}");
-        println!("{}", "=".repeat(50));
+        // println!("{message:?}");
+        // println!("{}", "=".repeat(50));
+
+        order_book.apply_update(&message);
+        let l1 = order_book.top_of_book();
+        println!("{:?}", l1);
     }
     Ok(())
 }
