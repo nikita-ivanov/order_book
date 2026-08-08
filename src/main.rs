@@ -48,7 +48,7 @@ async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>) -> Result<
 
 async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result<()> {
     // TODO build a reconnect loop
-    // TODO handle update/snapshot messages differently
+    // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
         // println!("{msg:?}");
         let message: BookMessage = match msg {
@@ -95,12 +95,9 @@ async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result
                 continue;
             }
         };
-        // println!("{message:?}");
-        // println!("{}", "=".repeat(50));
 
         order_book.apply_update(&message);
-        let l1 = order_book.top_of_book();
-        println!("{:?}", l1);
+        println!("{:?}", order_book.top_of_book());
     }
     Ok(())
 }

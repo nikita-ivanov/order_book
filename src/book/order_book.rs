@@ -19,7 +19,6 @@ impl OrderBook {
     }
 
     pub fn apply_update(&mut self, update_data: &BookMessage) {
-        // TODO: implement removing of values when qty = 0.0
         // TODO: not sure I like data[0] access, though it is currently quaranteed to have exactly 1 element
         let bids = &update_data.data[0].bids;
         let asks = &update_data.data[0].asks;
@@ -84,7 +83,6 @@ pub struct BidAskPair {
     pub ask_qty: f64,
 }
 
-// TODO write tests for OrderBook
 #[cfg(test)]
 mod tests {
     use chrono::DateTime;
@@ -203,4 +201,48 @@ mod tests {
         };
         assert_eq!(book.top_of_book(), expected);
     }
+}
+
+#[cfg(test)]
+mod tests_checksum {
+    fn get_raw_message() -> String {
+        // from kraken docs: https://docs.kraken.com/exchange/guides/websockets/book-checksum-v2
+        let msg = r#"
+            {
+              "channel": "book",
+              "type": "snapshot",
+              "data": [{
+                "symbol": "BTC/USD",
+                "bids": [
+                  {"price": "45283.5", "qty": "0.10000000"},
+                  {"price": "45283.4", "qty": "1.54582015"},
+                  {"price": "45282.1", "qty": "0.10000000"},
+                  {"price": "45281.0", "qty": "0.10000000"},
+                  {"price": "45280.3", "qty": "1.54592586"},
+                  {"price": "45279.0", "qty": "0.07990000"},
+                  {"price": "45277.6", "qty": "0.03310103"},
+                  {"price": "45277.5", "qty": "0.30000000"},
+                  {"price": "45277.3", "qty": "1.54602737"},
+                  {"price": "45276.6", "qty": "0.15445238"}
+                ],
+                "asks": [
+                  {"price": "45285.2", "qty": "0.00100000"},
+                  {"price": "45286.4", "qty": "1.54571953"},
+                  {"price": "45286.6", "qty": "1.54571109"},
+                  {"price": "45289.6", "qty": "1.54560911"},
+                  {"price": "45290.2", "qty": "0.15890660"},
+                  {"price": "45291.8", "qty": "1.54553491"},
+                  {"price": "45294.7", "qty": "0.04454749"},
+                  {"price": "45296.1", "qty": "0.35380000"},
+                  {"price": "45297.5", "qty": "0.09945542"},
+                  {"price": "45299.5", "qty": "0.18772827"}
+                ],
+                "checksum": 3310070434
+              }]
+            }
+            "#;
+
+        String::from(msg)
+    }
+    // TODO: finish test
 }
