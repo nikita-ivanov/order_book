@@ -50,7 +50,7 @@ async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result
     // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
-        println!("{msg:?}");
+        // println!("{msg:?}");
         let message: BookMessage = match msg {
             Ok(Message::Text(bytes)) => {
                 let info: BasicInfo = match serde_json::from_str(&bytes) {
@@ -97,7 +97,7 @@ async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result
         };
 
         order_book.apply_update(&message);
-        // println!("{:?}", order_book.top_of_book());
+        println!("{:?}", order_book.top_of_book());
     }
     Ok(())
 }

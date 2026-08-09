@@ -1,10 +1,6 @@
-use std::{collections::BTreeMap, ops::AddAssign};
-
-use rustls::CipherSuite::TLS_ECDH_anon_WITH_DES_CBC_SHA_draft;
-use serde_json::Number;
-use tokio_tungstenite::tungstenite::http::header::{ValueIter, Values};
-
 use crate::{BookMessage, book::models::BookData};
+use serde_json::Number;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct OrderBook {
@@ -34,23 +30,6 @@ impl OrderBook {
         let value_int = (value_float * ((10 as i64).pow(precision as u32) as f64)) as i64;
 
         value_int
-    }
-
-    fn i64_to_str(value: i64, precision: usize) -> String {
-        let denominator = (10 as i64).pow(precision as u32);
-        let first_half = value / denominator;
-        let second_half = value % denominator;
-
-        let mut seconds_half_string = second_half.to_string();
-
-        // keep adding zeros to the end until we reach precision
-        while seconds_half_string.len() < precision {
-            seconds_half_string.add_assign("0");
-        }
-
-        let parsed = first_half.to_string() + "." + &seconds_half_string[..];
-
-        parsed
     }
 
     pub fn apply_update(&mut self, update_data: &BookMessage) {
@@ -118,28 +97,6 @@ pub struct BidAskPair {
     pub bid_qty: i64,
     pub ask_price: i64,
     pub ask_qty: i64,
-}
-
-// TODO: we currently compute checksum on the message while we should compute or OrderBook
-fn compute_book_checksum(data: &BookData) -> u32 {
-    let bids = &data.bids;
-    let asks = &data.asks;
-
-    let bids_strings: Vec<String> = bids
-        .iter()
-        .rev()
-        .map(|q| q.price.to_string().replace(".", "") + &q.qty.to_string().replace(".", "")[..])
-        .collect();
-
-    let asks_strings: Vec<String> = asks
-        .iter()
-        .map(|q| q.price.to_string().replace(".", "") + &q.qty.to_string().replace(".", "")[..])
-        .collect();
-
-    let concatenated = bids_strings.concat() + &asks_strings.concat()[..];
-    let hashed = crc32fast::hash(concatenated[..].as_bytes());
-
-    hashed
 }
 
 #[cfg(test)]
@@ -308,12 +265,11 @@ mod tests {
 
 #[cfg(test)]
 mod tests_checksum {
+    use serde_json::Number;
+
     use crate::{
         BookMessage,
-        book::{
-            models::BookData,
-            order_book::{OrderBook, compute_book_checksum},
-        },
+        book::{models::BookData, order_book::OrderBook},
     };
 
     fn get_book_data() -> BookData {
@@ -361,10 +317,28 @@ mod tests_checksum {
     // TODO: finish test
 
     // is it a smell to test private methods?
+    /// Test conversion from `Number`s to i64 (which are used to store order book bids and asks)
     #[test]
-    fn test_i64_to_string_parsing() {
-        let number: i64 = 40423;
-        let parsed = OrderBook::i64_to_str(number, 8);
-        assert_eq!(parsed, "0.40423000");
+    fn test_number_to_i64_parsing() {
+        let number = Number::from_f64(0.40423).unwrap();
+        let parsed = OrderBook::number_to_i64(&number, 8);
+        assert_eq!(parsed, 40423000);
+
+        let number = Number::from_f64(22.40423).unwrap();
+        let parsed = OrderBook::number_to_i64(&number, 8);
+        assert_eq!(parsed, 2240423000);
+
+        let number = Number::from_f64(100.0).unwrap();
+        let parsed = OrderBook::number_to_i64(&number, 2);
+        assert_eq!(parsed, 10000);
+
+        let number = Number::from_f64(100.1).unwrap();
+        let parsed = OrderBook::number_to_i64(&number, 2);
+        assert_eq!(parsed, 10010);
+
+        // note that below we ignore the last (3rd) digit since our precision is 2
+        let number = Number::from_f64(100.123).unwrap();
+        let parsed = OrderBook::number_to_i64(&number, 2);
+        assert_eq!(parsed, 10012);
     }
 }
