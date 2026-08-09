@@ -27,18 +27,18 @@ impl OrderBook {
         }
     }
 
-    fn number_to_i64(number: &Number) -> i64 {
-        let value_str = number.as_str().replace(".", "");
-        // TODO: handle unwrap
-        let value_i64 = value_str.parse::<i64>().unwrap();
-        value_i64
+    fn number_to_i64(number: &Number, precision: usize) -> i64 {
+        let value_float = number.as_f64().unwrap();
+
+        // is it ok?
+        let value_int = (value_float * ((10 as i64).pow(precision as u32) as f64)) as i64;
+
+        value_int
     }
 
     fn i64_to_str(value: i64, precision: usize) -> String {
         let denominator = (10 as i64).pow(precision as u32);
-        println!("denominator={denominator}");
         let first_half = value / denominator;
-        println!("first_half={first_half}");
         let second_half = value % denominator;
 
         let mut seconds_half_string = second_half.to_string();
@@ -47,7 +47,7 @@ impl OrderBook {
         while seconds_half_string.len() < precision {
             seconds_half_string.add_assign("0");
         }
-        println!("seconds_half={second_half}");
+
         let parsed = first_half.to_string() + "." + &seconds_half_string[..];
 
         parsed
@@ -59,8 +59,8 @@ impl OrderBook {
         let asks = &update_data.data[0].asks;
 
         for bid in bids {
-            let price = OrderBook::number_to_i64(&bid.price);
-            let qty = OrderBook::number_to_i64(&bid.qty);
+            let price = OrderBook::number_to_i64(&bid.price, self.pair_decimals);
+            let qty = OrderBook::number_to_i64(&bid.qty, self.lot_decimals);
             match qty {
                 0 => self.bids.remove(&price),
                 _ => self.bids.insert(price, qty),
@@ -68,8 +68,8 @@ impl OrderBook {
         }
 
         for ask in asks {
-            let price = OrderBook::number_to_i64(&ask.price);
-            let qty = OrderBook::number_to_i64(&ask.qty);
+            let price = OrderBook::number_to_i64(&ask.price, self.pair_decimals);
+            let qty = OrderBook::number_to_i64(&ask.qty, self.lot_decimals);
             match qty {
                 0 => self.asks.remove(&price),
                 _ => self.asks.insert(price, qty),
@@ -144,6 +144,8 @@ fn compute_book_checksum(data: &BookData) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use chrono::DateTime;
     use serde_json::Number;
 
@@ -157,8 +159,8 @@ mod tests {
             let price = start_price + i as f64;
             let qty = start_qty + i as f64;
             let quote = Quote {
-                price: Number::from_f64(price).unwrap(),
-                qty: Number::from_f64(qty).unwrap(),
+                price: Number::from_str(&price.to_string()[..]).unwrap(),
+                qty: Number::from_str(&qty.to_string()[..]).unwrap(),
             };
             values.push(quote);
         }
@@ -186,6 +188,12 @@ mod tests {
         book_message
     }
 
+    fn str_to_i64(s: &str, precision: usize) -> i64 {
+        let number = Number::from_str(s).unwrap();
+        // TODO: is it ok we use private method here?
+        OrderBook::number_to_i64(&number, precision)
+    }
+
     #[test]
     fn test_order_book_trims_to_depth() {
         let mut book = OrderBook::new(10);
@@ -211,11 +219,20 @@ mod tests {
         book.apply_update(&get_book_message(2, 100.0, 42.0));
         book.apply_update(&get_book_message(2, 100.0, 24.0));
 
-        let bid_level = book.bids.get(&10000).unwrap();
-        assert_eq!(bid_level, &24);
+        let expected_qty = str_to_i64("24", book.lot_decimals);
 
-        let ask_level = book.asks.get(&10000).unwrap();
-        assert_eq!(ask_level, &24);
+        let bid_level = book
+            .bids
+            .get(&str_to_i64("100.0", book.pair_decimals))
+            .unwrap();
+
+        assert_eq!(bid_level, &expected_qty);
+
+        let ask_level = book
+            .asks
+            .get(&str_to_i64("100.0", book.pair_decimals))
+            .unwrap();
+        assert_eq!(ask_level, &expected_qty);
     }
 
     #[test]
@@ -225,10 +242,33 @@ mod tests {
         book.apply_update(&get_book_message(1, 100.0, 42.0));
         book.apply_update(&get_book_message(1, 105.0, 422.0));
 
-        assert_eq!(book.bids.get(&10000).unwrap(), &42);
-        assert_eq!(book.bids.get(&10500).unwrap(), &422);
-        assert_eq!(book.asks.get(&10000).unwrap(), &42);
-        assert_eq!(book.asks.get(&10500).unwrap(), &422);
+        assert_eq!(
+            book.bids
+                .get(&str_to_i64("100.0", book.pair_decimals))
+                .unwrap(),
+            &str_to_i64("42.0", book.lot_decimals)
+        );
+
+        assert_eq!(
+            book.bids
+                .get(&str_to_i64("105.0", book.pair_decimals))
+                .unwrap(),
+            &str_to_i64("422.0", book.lot_decimals)
+        );
+
+        assert_eq!(
+            book.bids
+                .get(&str_to_i64("100.0", book.pair_decimals))
+                .unwrap(),
+            &str_to_i64("42.0", book.lot_decimals)
+        );
+
+        assert_eq!(
+            book.bids
+                .get(&str_to_i64("105.0", book.pair_decimals))
+                .unwrap(),
+            &str_to_i64("422.0", book.lot_decimals)
+        );
     }
 
     #[test]
@@ -239,28 +279,28 @@ mod tests {
 
         // we have two book updates with 100.0 and 101.0 prices
         let expected = BidAskPair {
-            bid_price: 10100,
-            bid_qty: 43,
-            ask_price: 10000,
-            ask_qty: 42,
+            bid_price: str_to_i64("101.0", book.pair_decimals),
+            bid_qty: str_to_i64("43", book.lot_decimals),
+            ask_price: str_to_i64("100.0", book.pair_decimals),
+            ask_qty: str_to_i64("42", book.lot_decimals),
         };
         assert_eq!(book.top_of_book(), expected);
 
         book.apply_update(&get_book_message(1, 105.0, 2.0));
         let expected = BidAskPair {
-            bid_price: 10500,
-            bid_qty: 2,
-            ask_price: 10000,
-            ask_qty: 42,
+            bid_price: str_to_i64("105.0", book.pair_decimals),
+            bid_qty: str_to_i64("2", book.lot_decimals),
+            ask_price: str_to_i64("100.0", book.pair_decimals),
+            ask_qty: str_to_i64("42", book.lot_decimals),
         };
         assert_eq!(book.top_of_book(), expected);
 
         book.apply_update(&get_book_message(1, 98.0, 3.0));
         let expected = BidAskPair {
-            bid_price: 10500,
-            bid_qty: 2,
-            ask_price: 9800,
-            ask_qty: 3,
+            bid_price: str_to_i64("105.0", book.pair_decimals),
+            bid_qty: str_to_i64("2", book.lot_decimals),
+            ask_price: str_to_i64("98.0", book.pair_decimals),
+            ask_qty: str_to_i64("3", book.lot_decimals),
         };
         assert_eq!(book.top_of_book(), expected);
     }
