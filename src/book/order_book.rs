@@ -1,5 +1,6 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::AddAssign};
 
+use rustls::CipherSuite::TLS_ECDH_anon_WITH_DES_CBC_SHA_draft;
 use serde_json::Number;
 use tokio_tungstenite::tungstenite::http::header::{ValueIter, Values};
 
@@ -39,8 +40,16 @@ impl OrderBook {
         let first_half = value / denominator;
         println!("first_half={first_half}");
         let second_half = value % denominator;
+
+        let mut seconds_half_string = second_half.to_string();
+
+        // keep adding zeros to the end until we reach precision
+        while seconds_half_string.len() < precision {
+            seconds_half_string.add_assign("0");
+        }
         println!("seconds_half={second_half}");
-        let parsed = first_half.to_string() + "." + &second_half.to_string()[..];
+        let parsed = first_half.to_string() + "." + &seconds_half_string[..];
+
         parsed
     }
 
