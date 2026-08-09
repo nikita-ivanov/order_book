@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Number;
 
 /// Kraken has inconsistent response shape where messages do not share the same schema.
 /// We use small strcut below to decide what to do with the message.
@@ -52,8 +53,8 @@ pub struct BookData {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Quote {
-    pub price: f64,
-    pub qty: f64,
+    pub price: Number,
+    pub qty: Number,
 }
 
 // below do are not really needed since they are essentially the same models
