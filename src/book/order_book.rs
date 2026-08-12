@@ -1,4 +1,4 @@
-use crate::{BookMessage, book::models::BookData};
+use crate::BookMessage;
 use serde_json::Number;
 use std::collections::BTreeMap;
 
@@ -24,12 +24,24 @@ impl OrderBook {
     }
 
     fn number_to_i64(number: &Number, precision: usize) -> i64 {
-        let value_float = number.as_f64().unwrap();
+        let number_string = number.to_string();
+        let (first_part, second_part) = match number_string.contains(".") {
+            true => number_string.split_once(".").unwrap(),
+            false => (number_string.as_str(), "0"),
+        };
+        let first_part = String::from(first_part);
+        let mut second_part = String::from(second_part);
 
-        // is it ok?
-        let value_int = (value_float * ((10 as i64).pow(precision as u32) as f64)) as i64;
+        while second_part.len() < precision {
+            second_part += "0";
+        }
 
-        value_int
+        let combined = first_part + &second_part[..];
+
+        // TODO: handle unwrap gracefully
+        let result = combined.parse::<i64>().unwrap();
+
+        result
     }
 
     pub fn apply_update(&mut self, update_data: &BookMessage) {
@@ -236,8 +248,8 @@ mod tests {
 
         // we have two book updates with 100.0 and 101.0 prices
         let expected = BidAskPair {
-            bid_price: str_to_i64("101.0", book.pair_decimals),
-            bid_qty: str_to_i64("43", book.lot_decimals),
+            bid_price: 10100,
+            bid_qty: 4300000000,
             ask_price: str_to_i64("100.0", book.pair_decimals),
             ask_qty: str_to_i64("42", book.lot_decimals),
         };
@@ -335,8 +347,12 @@ mod tests_checksum {
         let number = Number::from_f64(100.1).unwrap();
         let parsed = OrderBook::number_to_i64(&number, 2);
         assert_eq!(parsed, 10010);
+    }
 
-        // note that below we ignore the last (3rd) digit since our precision is 2
+    #[test]
+    #[should_panic]
+    fn test_number_to_i64_parsing_panics_on_too_many_digits() {
+        // note that below we got 3 precision points while we expect 2
         let number = Number::from_f64(100.123).unwrap();
         let parsed = OrderBook::number_to_i64(&number, 2);
         assert_eq!(parsed, 10012);
