@@ -13,9 +13,11 @@ async fn main() -> Result<()> {
     let (mut tx, mut rx) = ws.split();
 
     let symbols = vec![String::from("ETH/USD")];
-    let mut order_book = OrderBook::new(10, 2, 8);
+    let depth = 25;
 
-    request_channels(&mut tx, symbols).await?;
+    let mut order_book = OrderBook::new(depth, 2, 8);
+
+    request_channels(&mut tx, symbols, depth).await?;
     receiving_loop(&mut rx, &mut order_book).await?;
 
     Ok(())
@@ -32,11 +34,12 @@ async fn connect() -> Result<WebsocketStream> {
     Ok(ws)
 }
 
-async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>) -> Result<()> {
+async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>, depth: usize) -> Result<()> {
     let data = serde_json::json!({
         "method": "subscribe",
         "params": {
             "channel": "book",
+            "depth": depth,
             "symbol": symbols,
         }
     });
