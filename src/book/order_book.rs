@@ -1,4 +1,5 @@
 use crate::BookMessage;
+use crc32fast;
 use serde_json::Number;
 use std::collections::BTreeMap;
 
@@ -12,12 +13,12 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
-    pub fn new(depth: usize) -> OrderBook {
-        // TODO: for now we hard code the decimals values, should be injected
+    pub fn new(depth: usize, pair_decimals: usize, lot_decimals: usize) -> OrderBook {
+        // TODO for now we hard code the decimals values, should be injected
         OrderBook {
             depth,
-            pair_decimals: 2,
-            lot_decimals: 8,
+            pair_decimals: pair_decimals,
+            lot_decimals: lot_decimals,
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
         }
@@ -39,9 +40,7 @@ impl OrderBook {
         let combined = first_part + &second_part[..];
 
         // TODO: handle unwrap gracefully
-        let result = combined.parse::<i64>().unwrap();
-
-        result
+        combined.parse::<i64>().unwrap()
     }
 
     pub fn apply_update(&mut self, update_data: &BookMessage) {
@@ -101,6 +100,38 @@ impl OrderBook {
             ask_qty: *best_ask_qty,
         }
     }
+
+    pub fn compute_checksum(&self) -> u32 {
+        let bids = &self.bids;
+        let asks = &self.asks;
+
+        let mut concatenated_asks = String::new();
+        for ask in asks {
+            let (price, qty) = ask;
+            let parsed_price = price.to_string();
+            let parsed_qty = qty.to_string();
+
+            concatenated_asks += &parsed_price[..];
+            concatenated_asks += &parsed_qty[..];
+            println!("concatenated asks {:?}", concatenated_asks);
+        }
+
+        let mut concatenated_bids = String::new();
+        for bid in bids.iter().rev() {
+            let (price, qty) = bid;
+            let parsed_price = price.to_string();
+            let parsed_qty = qty.to_string();
+
+            concatenated_bids += &parsed_price[..];
+            concatenated_bids += &parsed_qty[..];
+            println!("concatenated bids {:?}", concatenated_bids);
+        }
+
+        let asks_and_bids = concatenated_asks + &concatenated_bids[..];
+        println!("concatenated asks and bids {:?}", asks_and_bids);
+
+        crc32fast::hash(asks_and_bids.as_bytes())
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -148,13 +179,11 @@ mod tests {
                 .to_utc(),
         };
 
-        let book_message = BookMessage {
+        BookMessage {
             channel: String::from("book"),
             r#type: String::from("update"),
             data: [book_data],
-        };
-
-        book_message
+        }
     }
 
     fn str_to_i64(s: &str, precision: usize) -> i64 {
@@ -165,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_order_book_trims_to_depth() {
-        let mut book = OrderBook::new(10);
+        let mut book = OrderBook::new(10, 2, 8);
 
         book.apply_update(&get_book_message(10, 100.0, 42.0));
         assert_eq!(book.bids.len(), 10);
@@ -183,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_order_book_overwrites_quantities() {
-        let mut book = OrderBook::new(10);
+        let mut book = OrderBook::new(10, 2, 8);
 
         book.apply_update(&get_book_message(2, 100.0, 42.0));
         book.apply_update(&get_book_message(2, 100.0, 24.0));
@@ -206,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_order_book_all_price_levels_present() {
-        let mut book = OrderBook::new(10);
+        let mut book = OrderBook::new(10, 2, 8);
 
         book.apply_update(&get_book_message(1, 100.0, 42.0));
         book.apply_update(&get_book_message(1, 105.0, 422.0));
@@ -242,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_top_of_book_returns_correct_values() {
-        let mut book = OrderBook::new(10);
+        let mut book = OrderBook::new(10, 2, 8);
 
         book.apply_update(&get_book_message(2, 100.0, 42.0));
 
@@ -277,6 +306,7 @@ mod tests {
 
 #[cfg(test)]
 mod tests_checksum {
+    use chrono::DateTime;
     use serde_json::Number;
 
     use crate::{
@@ -284,51 +314,61 @@ mod tests_checksum {
         book::{models::BookData, order_book::OrderBook},
     };
 
-    fn get_book_data() -> BookData {
+    fn get_book_data() -> BookMessage {
         // from kraken docs: https://docs.kraken.com/exchange/guides/websockets/book-checksum-v2
         let msg = serde_json::json!(
             {
-              "channel": "book",
-              "type": "snapshot",
-              "data": [{
+            "channel": "book",
+            "type": "snapshot",
+            "data": [{
                 "symbol": "BTC/USD",
                 "bids": [
-                  {"price": "45283.5", "qty": "0.10000000"},
-                  {"price": "45283.4", "qty": "1.54582015"},
-                  {"price": "45282.1", "qty": "0.10000000"},
-                  {"price": "45281.0", "qty": "0.10000000"},
-                  {"price": "45280.3", "qty": "1.54592586"},
-                  {"price": "45279.0", "qty": "0.07990000"},
-                  {"price": "45277.6", "qty": "0.03310103"},
-                  {"price": "45277.5", "qty": "0.30000000"},
-                  {"price": "45277.3", "qty": "1.54602737"},
-                  {"price": "45276.6", "qty": "0.15445238"}
+                {"price": 45283.5, "qty": 0.10000000},
+                {"price": 45283.4, "qty": 1.54582015},
+                {"price": 45282.1, "qty": 0.10000000},
+                {"price": 45281.0, "qty": 0.10000000},
+                {"price": 45280.3, "qty": 1.54592586},
+                {"price": 45279.0, "qty": 0.07990000},
+                {"price": 45277.6, "qty": 0.03310103},
+                {"price": 45277.5, "qty": 0.30000000},
+                {"price": 45277.3, "qty": 1.54602737},
+                {"price": 45276.6, "qty": 0.15445238}
                 ],
                 "asks": [
-                  {"price": "45285.2", "qty": "0.00100000"},
-                  {"price": "45286.4", "qty": "1.54571953"},
-                  {"price": "45286.6", "qty": "1.54571109"},
-                  {"price": "45289.6", "qty": "1.54560911"},
-                  {"price": "45290.2", "qty": "0.15890660"},
-                  {"price": "45291.8", "qty": "1.54553491"},
-                  {"price": "45294.7", "qty": "0.04454749"},
-                  {"price": "45296.1", "qty": "0.35380000"},
-                  {"price": "45297.5", "qty": "0.09945542"},
-                  {"price": "45299.5", "qty": "0.18772827"}
+                {"price": 45285.2, "qty": 0.00100000},
+                {"price": 45286.4, "qty": 1.54571953},
+                {"price": 45286.6, "qty": 1.54571109},
+                {"price": 45289.6, "qty": 1.54560911},
+                {"price": 45290.2, "qty": 0.15890660},
+                {"price": 45291.8, "qty": 1.54553491},
+                {"price": 45294.7, "qty": 0.04454749},
+                {"price": 45296.1, "qty": 0.35380000},
+                {"price": 45297.5, "qty": 0.09945542},
+                {"price": 45299.5, "qty": 0.18772827}
                 ],
-                "checksum": 3310070434 as u32
-              }]
+                "checksum": 3310070434 as u32,
+                "timestamp": chrono::prelude::Utc::now()
+            }]
             }
         );
 
         let book_message: BookMessage = serde_json::from_slice(msg.to_string().as_bytes()).unwrap();
 
-        // is it ok to do that trick to get ownership of data?
-        book_message.data.into_iter().nth(0).unwrap()
+        book_message
     }
-    // TODO: finish test
+    #[test]
+    fn test_checksum_computed_correctly() {
+        let book_message = get_book_data();
 
-    // is it a smell to test private methods?
+        let mut book = OrderBook::new(10, 1, 8);
+        book.apply_update(&book_message);
+
+        // is it ok to do that trick to get ownership of data?
+        let computed_checksum = book.compute_checksum();
+
+        assert_eq!(computed_checksum, 3310070434);
+    }
+
     /// Test conversion from `Number`s to i64 (which are used to store order book bids and asks)
     #[test]
     fn test_number_to_i64_parsing() {

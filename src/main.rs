@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     let (mut tx, mut rx) = ws.split();
 
     let symbols = vec![String::from("ETH/USD")];
-    let mut order_book = OrderBook::new(10);
+    let mut order_book = OrderBook::new(10, 2, 8);
 
     request_channels(&mut tx, symbols).await?;
     receiving_loop(&mut rx, &mut order_book).await?;
@@ -66,7 +66,7 @@ async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result
                 let msg_type = info.parse();
                 match msg_type {
                     BasicInfoResult::Snapshot | BasicInfoResult::Update => {
-                        let book_message = match serde_json::from_str(&bytes) {
+                        match serde_json::from_str(&bytes) {
                             Ok(result) => result,
                             Err(e) => {
                                 println!("Error parsing message, will continue");
@@ -74,8 +74,7 @@ async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result
                                 println!("Error was: {e:?}");
                                 continue;
                             }
-                        };
-                        book_message
+                        }
                     }
                     _ => {
                         println!("Skipping message as it does not have order book data");
