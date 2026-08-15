@@ -14,11 +14,10 @@ pub struct OrderBook {
 
 impl OrderBook {
     pub fn new(depth: usize, pair_decimals: usize, lot_decimals: usize) -> OrderBook {
-        // TODO for now we hard code the decimals values, should be injected
         OrderBook {
             depth,
-            pair_decimals: pair_decimals,
-            lot_decimals: lot_decimals,
+            pair_decimals,
+            lot_decimals,
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
         }
@@ -45,10 +44,9 @@ impl OrderBook {
 
     pub fn apply_update(&mut self, update_data: &BookMessage) {
         // TODO: not sure I like data[0] access, though it is currently quaranteed to have exactly 1 element
-        let bids = &update_data.data[0].bids;
-        let asks = &update_data.data[0].asks;
+        let book_data = &update_data.data[0];
 
-        for bid in bids {
+        for bid in &book_data.bids {
             let price = OrderBook::number_to_i64(&bid.price, self.pair_decimals);
             let qty = OrderBook::number_to_i64(&bid.qty, self.lot_decimals);
             match qty {
@@ -57,7 +55,7 @@ impl OrderBook {
             };
         }
 
-        for ask in asks {
+        for ask in &book_data.asks {
             let price = OrderBook::number_to_i64(&ask.price, self.pair_decimals);
             let qty = OrderBook::number_to_i64(&ask.qty, self.lot_decimals);
             match qty {
@@ -74,6 +72,26 @@ impl OrderBook {
         while self.asks.len() > self.depth {
             println!("Trimming asks from {} to {}", self.asks.len(), self.depth);
             self.asks.pop_last();
+        }
+
+        println!(
+            "current depth: bids {}, asks {}",
+            self.bids.len(),
+            self.asks.len()
+        );
+
+        // TODO: check checksum and return Error if does not match
+        let computed_checksum = self.compute_checksum();
+        if book_data.checksum != computed_checksum {
+            panic!(
+                "checksum does not match: computed {computed_checksum} vs. received {}",
+                book_data.checksum
+            );
+        } else {
+            println!(
+                "checksums match! computed {} vs. received {}",
+                computed_checksum, book_data.checksum
+            );
         }
     }
 
@@ -102,8 +120,9 @@ impl OrderBook {
     }
 
     pub fn compute_checksum(&self) -> u32 {
-        let bids = &self.bids;
-        let asks = &self.asks;
+        // kraken computes checksum on the first 10 entries
+        let bids = self.bids.iter().rev().take(10);
+        let asks = self.asks.iter().take(10);
 
         let mut concatenated_asks = String::new();
         for ask in asks {
@@ -113,22 +132,19 @@ impl OrderBook {
 
             concatenated_asks += &parsed_price[..];
             concatenated_asks += &parsed_qty[..];
-            println!("concatenated asks {:?}", concatenated_asks);
         }
 
         let mut concatenated_bids = String::new();
-        for bid in bids.iter().rev() {
+        for bid in bids {
             let (price, qty) = bid;
             let parsed_price = price.to_string();
             let parsed_qty = qty.to_string();
 
             concatenated_bids += &parsed_price[..];
             concatenated_bids += &parsed_qty[..];
-            println!("concatenated bids {:?}", concatenated_bids);
         }
 
         let asks_and_bids = concatenated_asks + &concatenated_bids[..];
-        println!("concatenated asks and bids {:?}", asks_and_bids);
 
         crc32fast::hash(asks_and_bids.as_bytes())
     }
@@ -306,15 +322,18 @@ mod tests {
 
 #[cfg(test)]
 mod tests_checksum {
+    use std::str::FromStr;
+
+    use crate::book::{
+        models::{BookData, Quote},
+        order_book::tests,
+    };
     use chrono::DateTime;
     use serde_json::Number;
 
-    use crate::{
-        BookMessage,
-        book::{models::BookData, order_book::OrderBook},
-    };
+    use crate::{BookMessage, book::order_book::OrderBook};
 
-    fn get_book_data() -> BookMessage {
+    fn get_book_message() -> BookMessage {
         // from kraken docs: https://docs.kraken.com/exchange/guides/websockets/book-checksum-v2
         let msg = serde_json::json!(
             {
@@ -346,7 +365,7 @@ mod tests_checksum {
                 {"price": 45297.5, "qty": 0.09945542},
                 {"price": 45299.5, "qty": 0.18772827}
                 ],
-                "checksum": 3310070434 as u32,
+                "checksum": 3310070434_u32,
                 "timestamp": chrono::prelude::Utc::now()
             }]
             }
@@ -356,17 +375,53 @@ mod tests_checksum {
 
         book_message
     }
+
     #[test]
     fn test_checksum_computed_correctly() {
-        let book_message = get_book_data();
+        let book_message = get_book_message();
 
         let mut book = OrderBook::new(10, 1, 8);
         book.apply_update(&book_message);
 
-        // is it ok to do that trick to get ownership of data?
         let computed_checksum = book.compute_checksum();
+        assert_eq!(computed_checksum, book_message.data[0].checksum);
+    }
 
-        assert_eq!(computed_checksum, 3310070434);
+    #[test]
+    fn test_checksum_ignores_orders_beyond_10th() {
+        let book_message = get_book_message();
+
+        let mut book = OrderBook::new(10, 1, 8);
+        book.apply_update(&book_message);
+
+        // set bid lower and ask higher than get_book_message() values
+        // to make sure they end up in the tail (11th position) and are ingored
+        let book_data = BookData {
+            symbol: String::from("X"),
+            bids: Vec::from([Quote {
+                price: Number::from_str("5.0").unwrap(),
+                qty: Number::from_str("5.0").unwrap(),
+            }]),
+            asks: Vec::from([Quote {
+                price: Number::from_str("1500000.0").unwrap(),
+                qty: Number::from_str("5.0").unwrap(),
+            }]),
+            checksum: 42,
+            timestamp: DateTime::parse_from_rfc3339("2026-06-26T11:00:00+02:00")
+                .unwrap()
+                .to_utc(),
+        };
+
+        let new_message = BookMessage {
+            channel: String::from("book"),
+            r#type: String::from("update"),
+            data: [book_data],
+        };
+
+        book.apply_update(&new_message);
+
+        let computed_checksum = book.compute_checksum();
+        assert_eq!(computed_checksum, book_message.data[0].checksum);
     }
 
     /// Test conversion from `Number`s to i64 (which are used to store order book bids and asks)
