@@ -3,7 +3,9 @@ use futures_util::{
     SinkExt, StreamExt,
     stream::{SplitSink, SplitStream},
 };
-use kraken_l3::{BasicInfo, BasicInfoResult, BookMessage, book::order_book::OrderBook};
+use kraken_l3::{
+    BasicInfo, BasicInfoResult, BookMessage, book::order_book::OrderBook, precision::get_precision,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
@@ -12,10 +14,17 @@ async fn main() -> Result<()> {
     let ws = connect().await?;
     let (mut tx, mut rx) = ws.split();
 
+    // right now we support one order book at a time
     let symbols = vec![String::from("ETH/USD")];
     let depth = 25;
 
-    let mut order_book = OrderBook::new(depth, 2, 8);
+    let precisions = get_precision(&symbols).await?;
+
+    let mut order_book = OrderBook::new(
+        depth,
+        precisions["ETH/USD"].pair_decimals,
+        precisions["ETH/USD"].lot_decimals,
+    );
 
     request_channels(&mut tx, symbols, depth).await?;
     receiving_loop(&mut rx, &mut order_book).await?;
@@ -50,6 +59,7 @@ async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>, depth: usi
 }
 
 async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result<()> {
+    // TODO route to order books based on symbol
     // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
