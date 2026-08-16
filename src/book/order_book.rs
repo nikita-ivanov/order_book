@@ -396,7 +396,7 @@ mod tests_checksum {
     fn test_checksum_ignores_orders_beyond_10th() {
         let book_message = get_book_message();
 
-        let mut book = OrderBook::new(10, 1, 8, true);
+        let mut book = OrderBook::new(15, 1, 8, true);
         book.apply_update(&book_message);
 
         // set bid lower and ask higher than get_book_message() values
