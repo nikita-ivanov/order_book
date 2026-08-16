@@ -16,9 +16,8 @@ async fn main() -> Result<()> {
     let ws = connect().await?;
     let (mut tx, mut rx) = ws.split();
 
-    // right now we support one order book at a time
     let symbols = vec!["ETH/USD".to_string(), "BTC/USD".to_string()];
-    let depth = 25;
+    let depth = 10;
 
     let precisions = get_precision(&symbols).await?;
 
@@ -67,7 +66,6 @@ async fn receiving_loop(
     rx: &mut Receiver,
     order_books: &mut HashMap<&String, OrderBook>,
 ) -> Result<()> {
-    // TODO route to order books based on symbol
     // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {

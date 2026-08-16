@@ -17,20 +17,13 @@ pub enum BasicInfoResult {
 }
 
 impl BasicInfo {
-    pub fn parse(self) -> BasicInfoResult {
-        let is_book_data = self.channel.is_some_and(|c| c.contains("book"));
+    pub fn parse(&self) -> BasicInfoResult {
+        let is_book_data = self.channel.as_ref().is_some_and(|c| c.contains("book"));
 
-        match self.r#type {
-            Some(t) => {
-                if is_book_data && t.contains("update") {
-                    BasicInfoResult::Update
-                } else if is_book_data && t.contains("snapshot") {
-                    BasicInfoResult::Snapshot
-                } else {
-                    BasicInfoResult::Unknown
-                }
-            }
-            None => BasicInfoResult::Unknown,
+        match self.r#type.as_ref() {
+            Some(t) if is_book_data && t.contains("update") => BasicInfoResult::Update,
+            Some(t) if is_book_data && t.contains("snapshot") => BasicInfoResult::Snapshot,
+            Some(_) | None => BasicInfoResult::Unknown,
         }
     }
 }
@@ -56,28 +49,3 @@ pub struct Quote {
     pub price: Number,
     pub qty: Number,
 }
-
-// below do are not really needed since they are essentially the same models
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct BookSnapshot {
-//     channel: String,
-//     r#type: String,
-//     symbol: String,
-//     bids: Vec<Quote>,
-//     asks: Vec<Quote>,
-// }
-
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct BookUpdate {
-//     channel: String,
-//     r#type: String,
-//     symbol: String,
-//     bid: Quote,
-//     ask: Quote,
-// }
-
-// #[derive(Serialize, Deserialize, Debug)]
-// pub enum BookMessageV2 {
-//     Snapshot(BookSnapshot),
-//     Update(BookUpdate),
-// }

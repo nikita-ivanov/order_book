@@ -1,5 +1,4 @@
 use crate::BookMessage;
-use crc32fast;
 use serde_json::Number;
 use std::collections::BTreeMap;
 
@@ -139,8 +138,8 @@ impl OrderBook {
             let parsed_price = price.to_string();
             let parsed_qty = qty.to_string();
 
-            concatenated_asks += &parsed_price[..];
-            concatenated_asks += &parsed_qty[..];
+            concatenated_asks.push_str(&parsed_price);
+            concatenated_asks.push_str(&parsed_qty);
         }
 
         let mut concatenated_bids = String::new();
@@ -149,8 +148,8 @@ impl OrderBook {
             let parsed_price = price.to_string();
             let parsed_qty = qty.to_string();
 
-            concatenated_bids += &parsed_price[..];
-            concatenated_bids += &parsed_qty[..];
+            concatenated_bids.push_str(&parsed_price);
+            concatenated_bids.push_str(&parsed_qty);
         }
 
         let asks_and_bids = concatenated_asks + &concatenated_bids[..];
@@ -280,14 +279,14 @@ mod tests {
         );
 
         assert_eq!(
-            book.bids
+            book.asks
                 .get(&str_to_i64("100.0", book.pair_decimals))
                 .unwrap(),
             &str_to_i64("42.0", book.lot_decimals)
         );
 
         assert_eq!(
-            book.bids
+            book.asks
                 .get(&str_to_i64("105.0", book.pair_decimals))
                 .unwrap(),
             &str_to_i64("422.0", book.lot_decimals)

@@ -15,7 +15,7 @@ pub struct AssetPairPrecision {
     pub lot_decimals: usize,
 }
 
-pub async fn get_precision(pairs: &Vec<String>) -> Result<HashMap<String, AssetPairPrecision>> {
+pub async fn get_precision(pairs: &[String]) -> Result<HashMap<String, AssetPairPrecision>> {
     let url = "https://api.kraken.com/0/public/AssetPairs?aclass_base=currency&info=info&execution_venue=international&assetVersion=1";
     let pairs = pairs.join(",");
     let params = [("pair", pairs)];
