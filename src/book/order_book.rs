@@ -10,16 +10,23 @@ pub struct OrderBook {
     lot_decimals: usize,
     bids: BTreeMap<i64, i64>,
     asks: BTreeMap<i64, i64>,
+    verify_checksum: bool,
 }
 
 impl OrderBook {
-    pub fn new(depth: usize, pair_decimals: usize, lot_decimals: usize) -> OrderBook {
+    pub fn new(
+        depth: usize,
+        pair_decimals: usize,
+        lot_decimals: usize,
+        verify_checksum: bool,
+    ) -> OrderBook {
         OrderBook {
             depth,
             pair_decimals,
             lot_decimals,
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
+            verify_checksum,
         }
     }
 
@@ -81,17 +88,19 @@ impl OrderBook {
         );
 
         // TODO: check checksum and return Error if does not match
-        let computed_checksum = self.compute_checksum();
-        if book_data.checksum != computed_checksum {
-            panic!(
-                "checksum does not match: computed {computed_checksum} vs. received {}",
-                book_data.checksum
-            );
-        } else {
-            println!(
-                "checksums match! computed {} vs. received {}",
-                computed_checksum, book_data.checksum
-            );
+        if self.verify_checksum {
+            let computed_checksum = self.compute_checksum();
+            if book_data.checksum != computed_checksum {
+                panic!(
+                    "checksum does not match: computed {computed_checksum} vs. received {}",
+                    book_data.checksum
+                );
+            } else {
+                println!(
+                    "checksums match! computed {} vs. received {}",
+                    computed_checksum, book_data.checksum
+                );
+            }
         }
     }
 
@@ -210,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_order_book_trims_to_depth() {
-        let mut book = OrderBook::new(10, 2, 8);
+        let mut book = OrderBook::new(10, 2, 8, false);
 
         book.apply_update(&get_book_message(10, 100.0, 42.0));
         assert_eq!(book.bids.len(), 10);
@@ -228,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_order_book_overwrites_quantities() {
-        let mut book = OrderBook::new(10, 2, 8);
+        let mut book = OrderBook::new(10, 2, 8, false);
 
         book.apply_update(&get_book_message(2, 100.0, 42.0));
         book.apply_update(&get_book_message(2, 100.0, 24.0));
@@ -251,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_order_book_all_price_levels_present() {
-        let mut book = OrderBook::new(10, 2, 8);
+        let mut book = OrderBook::new(10, 2, 8, false);
 
         book.apply_update(&get_book_message(1, 100.0, 42.0));
         book.apply_update(&get_book_message(1, 105.0, 422.0));
@@ -287,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_top_of_book_returns_correct_values() {
-        let mut book = OrderBook::new(10, 2, 8);
+        let mut book = OrderBook::new(10, 2, 8, false);
 
         book.apply_update(&get_book_message(2, 100.0, 42.0));
 
@@ -324,10 +333,7 @@ mod tests {
 mod tests_checksum {
     use std::str::FromStr;
 
-    use crate::book::{
-        models::{BookData, Quote},
-        order_book::tests,
-    };
+    use crate::book::models::{BookData, Quote};
     use chrono::DateTime;
     use serde_json::Number;
 
@@ -380,7 +386,7 @@ mod tests_checksum {
     fn test_checksum_computed_correctly() {
         let book_message = get_book_message();
 
-        let mut book = OrderBook::new(10, 1, 8);
+        let mut book = OrderBook::new(10, 1, 8, true);
         book.apply_update(&book_message);
 
         let computed_checksum = book.compute_checksum();
@@ -391,7 +397,7 @@ mod tests_checksum {
     fn test_checksum_ignores_orders_beyond_10th() {
         let book_message = get_book_message();
 
-        let mut book = OrderBook::new(10, 1, 8);
+        let mut book = OrderBook::new(10, 1, 8, true);
         book.apply_update(&book_message);
 
         // set bid lower and ask higher than get_book_message() values
@@ -406,7 +412,9 @@ mod tests_checksum {
                 price: Number::from_str("1500000.0").unwrap(),
                 qty: Number::from_str("5.0").unwrap(),
             }]),
-            checksum: 42,
+            // the checksum on the new message should still be the same since it represents current
+            // oder book
+            checksum: book_message.data[0].checksum,
             timestamp: DateTime::parse_from_rfc3339("2026-06-26T11:00:00+02:00")
                 .unwrap()
                 .to_utc(),

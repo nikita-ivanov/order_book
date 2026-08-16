@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
 
     let mut order_books = HashMap::new();
     for (symbol, precision) in precisions.iter() {
-        let ob = OrderBook::new(depth, precision.pair_decimals, precision.lot_decimals);
+        let ob = OrderBook::new(depth, precision.pair_decimals, precision.lot_decimals, true);
         order_books.insert(symbol, ob);
     }
 
