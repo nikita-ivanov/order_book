@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use futures_util::{
     SinkExt, StreamExt,
@@ -15,19 +17,19 @@ async fn main() -> Result<()> {
     let (mut tx, mut rx) = ws.split();
 
     // right now we support one order book at a time
-    let symbols = vec![String::from("ETH/USD")];
+    let symbols = vec!["ETH/USD".to_string(), "BTC/USD".to_string()];
     let depth = 25;
 
     let precisions = get_precision(&symbols).await?;
 
-    let mut order_book = OrderBook::new(
-        depth,
-        precisions["ETH/USD"].pair_decimals,
-        precisions["ETH/USD"].lot_decimals,
-    );
+    let mut order_books = HashMap::new();
+    for (symbol, precision) in precisions.iter() {
+        let ob = OrderBook::new(depth, precision.pair_decimals, precision.lot_decimals);
+        order_books.insert(symbol, ob);
+    }
 
     request_channels(&mut tx, symbols, depth).await?;
-    receiving_loop(&mut rx, &mut order_book).await?;
+    receiving_loop(&mut rx, &mut order_books).await?;
 
     Ok(())
 }
@@ -58,7 +60,13 @@ async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>, depth: usi
     Ok(())
 }
 
-async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result<()> {
+// had to change String to &String because iterating over keys in main function gives references;
+// is it a smell or bad design to have &String but OrderBook (not reference) and having to
+// change function signatures?
+async fn receiving_loop(
+    rx: &mut Receiver,
+    order_books: &mut HashMap<&String, OrderBook>,
+) -> Result<()> {
     // TODO route to order books based on symbol
     // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently?
@@ -106,6 +114,12 @@ async fn receiving_loop(rx: &mut Receiver, order_book: &mut OrderBook) -> Result
                 println!("Websocket error, will skip. Error was {e:?}");
                 continue;
             }
+        };
+
+        let symbol = &message.data[0].symbol;
+        let order_book = match order_books.get_mut(symbol) {
+            Some(book) => book,
+            None => panic!("could not find order book "),
         };
 
         order_book.apply_update(&message);
