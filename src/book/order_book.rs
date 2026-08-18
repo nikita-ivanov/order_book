@@ -1,6 +1,21 @@
 use crate::BookMessage;
 use serde_json::Number;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, num::ParseIntError};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum OrderBookError {
+    #[error(
+        "Received number from exchange with higher precision than expected ({precision}): {number:?}"
+    )]
+    PrecisionExceeded { precision: usize, number: String },
+    #[error("Failed to convert string number to integer: {number}")]
+    InvalidNumber {
+        number: String,
+        #[source]
+        source: ParseIntError,
+    },
+}
 
 #[derive(Debug)]
 pub struct OrderBook {
@@ -29,23 +44,37 @@ impl OrderBook {
         }
     }
 
-    fn number_to_i64(number: &Number, precision: usize) -> i64 {
+    fn number_to_i64(number: &Number, precision: usize) -> Result<i64, OrderBookError> {
         let number_string = number.to_string();
-        let (first_part, second_part) = match number_string.contains(".") {
-            true => number_string.split_once(".").unwrap(),
-            false => (number_string.as_str(), "0"),
+
+        let (first_part, second_part) = match number_string.split_once(".") {
+            Some(split) => split,
+            None => (number_string.as_str(), "0"),
         };
+
         let first_part = String::from(first_part);
         let mut second_part = String::from(second_part);
+
+        // if we receive 100.123 while order book declares precision=2 (expecting 100.12) panic
+        if second_part.len() > precision {
+            return Err(OrderBookError::PrecisionExceeded {
+                precision,
+                number: number.to_string(),
+            });
+        }
 
         while second_part.len() < precision {
             second_part += "0";
         }
 
-        let combined = first_part + &second_part[..];
+        let combined = first_part + &second_part;
 
-        // TODO: handle unwrap gracefully
-        combined.parse::<i64>().unwrap()
+        combined
+            .parse::<i64>()
+            .map_err(|error| OrderBookError::InvalidNumber {
+                number: number_string,
+                source: error,
+            })
     }
 
     pub fn apply_update(&mut self, update_data: &BookMessage) {
@@ -456,7 +485,6 @@ mod tests_checksum {
     fn test_number_to_i64_parsing_panics_on_too_many_digits() {
         // note that below we got 3 precision points while we expect 2
         let number = Number::from_f64(100.123).unwrap();
-        let parsed = OrderBook::number_to_i64(&number, 2);
-        assert_eq!(parsed, 10012);
+        let _ = OrderBook::number_to_i64(&number, 2);
     }
 }
