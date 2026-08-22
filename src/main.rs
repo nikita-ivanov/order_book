@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     let ws = connect().await?;
     let (mut tx, mut rx) = ws.split();
 
-    let symbols = vec!["ETH/USD".to_string(), "BTC/USD".to_string()];
+    let symbols = vec!["ETH/USD".to_string()];
     let depth = 10;
 
     let precisions = get_precision(&symbols).await?;
@@ -59,9 +59,6 @@ async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>, depth: usi
     Ok(())
 }
 
-// had to change String to &String because iterating over keys in main function gives references;
-// is it a smell or bad design to have &String but OrderBook (not reference) and having to
-// change function signatures?
 async fn receiving_loop(
     rx: &mut Receiver,
     order_books: &mut HashMap<&String, OrderBook>,
@@ -120,7 +117,7 @@ async fn receiving_loop(
             None => panic!("could not find order book "),
         };
 
-        order_book.apply_update(&message);
+        order_book.apply_update(&message)?;
         println!("{:?}", order_book.top_of_book());
     }
     Ok(())
