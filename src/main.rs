@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
             Err(err) => match err {
                 OrderBookError::PrecisionExceeded { precision, number } => {
                     panic!(
-                        "Exchange sent a number which higher precision than expected, which is considered a breaking error.
+                        "Exchange sent a number with higher precision than expected, which is considered a breaking error.
                          Precision was {precision} while received number was {number}");
                 }
                 other => {
@@ -95,7 +95,6 @@ async fn receiving_loop(
     rx: &mut Receiver,
     order_books: &mut HashMap<&String, OrderBook>,
 ) -> Result<(), OrderBookError> {
-    // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
         // println!("{msg:?}");
