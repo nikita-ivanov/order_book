@@ -51,13 +51,13 @@ impl OrderBook {
     fn number_to_i64(number: &Number, precision: usize) -> Result<i64, OrderBookError> {
         let number_string = number.to_string();
 
-        let (first_part, second_part) = match number_string.split_once(".") {
+        let (int_part, frac_part) = match number_string.split_once(".") {
             Some(split) => split,
             None => (number_string.as_str(), "0"),
         };
 
-        let first_part = String::from(first_part);
-        let mut second_part = String::from(second_part);
+        let first_part = String::from(int_part);
+        let mut second_part = String::from(frac_part);
 
         // receiving more digits than expected is considered an error
         if second_part.len() > precision {
