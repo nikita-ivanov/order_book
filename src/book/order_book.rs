@@ -59,7 +59,7 @@ impl OrderBook {
         let first_part = String::from(first_part);
         let mut second_part = String::from(second_part);
 
-        // if we receive 100.123 while order book declares precision=2 (expecting 100.12) panic
+        // receiving more digits than expected is considered an error
         if second_part.len() > precision {
             return Err(OrderBookError::PrecisionExceeded {
                 precision,
@@ -356,7 +356,7 @@ mod tests {
         };
 
         book.apply_update(&new_message).unwrap();
-
+        let result = book.top_of_book();
         assert_eq!(result, Err(OrderBookError::BookEmpty));
 
         let mut book = OrderBook::new(10, 2, 8, false);
@@ -379,6 +379,7 @@ mod tests {
         };
 
         book.apply_update(&new_message).unwrap();
+        let result = book.top_of_book();
 
         assert_eq!(result, Err(OrderBookError::BookEmpty));
     }
