@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::collections::HashMap;
 
 use anyhow::Result;
@@ -6,31 +7,62 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
 };
 use kraken_l3::{
-    BasicInfo, BasicInfoResult, BookMessage, book::order_book::OrderBook, precision::get_precision,
+    BasicInfo, BasicInfoResult, BookMessage,
+    book::order_book::{OrderBook, OrderBookError},
+    precision::get_precision,
 };
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
+/// Order book streaming from Kraken WS (v2).
+#[derive(Parser, Debug)]
+struct Args {
+    /// Vector of pairs to collect order book for
+    symbols: Vec<String>,
+
+    /// Order book depth
+    #[arg(short, long, default_value_t = 10)]
+    depth: usize,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let ws = connect().await?;
-    let (mut tx, mut rx) = ws.split();
+    let args = Args::parse();
 
-    let symbols = vec!["ETH/USD".to_string()];
-    let depth = 10;
+    loop {
+        let ws = connect().await?;
+        let (mut tx, mut rx) = ws.split();
+        let precisions = get_precision(&args.symbols).await?;
 
-    let precisions = get_precision(&symbols).await?;
+        let mut order_books = HashMap::new();
+        for (symbol, precision) in precisions.iter() {
+            let ob = OrderBook::new(
+                args.depth,
+                precision.pair_decimals,
+                precision.lot_decimals,
+                true,
+            );
+            order_books.insert(symbol, ob);
+        }
 
-    let mut order_books = HashMap::new();
-    for (symbol, precision) in precisions.iter() {
-        let ob = OrderBook::new(depth, precision.pair_decimals, precision.lot_decimals, true);
-        order_books.insert(symbol, ob);
+        request_channels(&mut tx, &args.symbols, args.depth).await?;
+        match receiving_loop(&mut rx, &mut order_books).await {
+            Ok(_) => continue,
+            Err(err) => match err {
+                OrderBookError::PrecisionExceeded { precision, number } => {
+                    panic!(
+                        "Exchange sent a number which higher precision than expected, which is considered a breaking error.
+                         Precision was {precision} while received number was {number}");
+                }
+                other => {
+                    println!(
+                        "Received error, will reconnect and reconstruct the book. Error was: {other:?}"
+                    );
+                    continue;
+                }
+            },
+        };
     }
-
-    request_channels(&mut tx, symbols, depth).await?;
-    receiving_loop(&mut rx, &mut order_books).await?;
-
-    Ok(())
 }
 
 type WebsocketStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -44,7 +76,7 @@ async fn connect() -> Result<WebsocketStream> {
     Ok(ws)
 }
 
-async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>, depth: usize) -> Result<()> {
+async fn request_channels(tx: &mut Transmitter, symbols: &Vec<String>, depth: usize) -> Result<()> {
     let data = serde_json::json!({
         "method": "subscribe",
         "params": {
@@ -62,7 +94,7 @@ async fn request_channels(tx: &mut Transmitter, symbols: Vec<String>, depth: usi
 async fn receiving_loop(
     rx: &mut Receiver,
     order_books: &mut HashMap<&String, OrderBook>,
-) -> Result<()> {
+) -> Result<(), OrderBookError> {
     // TODO build a reconnect loop
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
