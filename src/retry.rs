@@ -1,44 +1,43 @@
-use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use std::{
-    cmp::{max, min},
-    time::Duration,
+    cmp::min,
+    time::{Duration, Instant},
 };
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq)]
 pub enum RetryDecision {
     Wait(Duration),
     GiveUp,
 }
 
 pub trait RetryPolicy {
-    fn on_success(&mut self);
     fn on_failure(&mut self) -> RetryDecision;
 }
 
 pub struct ExponentialRetryPolicy {
     attempt: u32,
-    start: DateTime<Utc>,
+    start: Instant,
+    happy_timeout_sec: u64,
 }
 
 impl ExponentialRetryPolicy {
-    pub fn new() -> ExponentialRetryPolicy {
+    pub fn new(happy_timeout: Option<u64>) -> ExponentialRetryPolicy {
         ExponentialRetryPolicy {
             attempt: 0,
-            start: DateTime::UNIX_EPOCH,
+            start: Instant::now(),
+            happy_timeout_sec: happy_timeout.unwrap_or(120),
         }
     }
 }
 
 impl RetryPolicy for ExponentialRetryPolicy {
     fn on_failure(&mut self) -> RetryDecision {
-        let elapsed = DateTime::UNIX_EPOCH - self.start;
-
-        if elapsed.num_seconds() > 120 {
-            self.start = DateTime::UNIX_EPOCH;
+        if self.start.elapsed().as_secs() >= self.happy_timeout_sec {
+            self.start = Instant::now();
+            self.attempt = 0;
         }
 
-        let duration_sec = 1 + 2_u64.pow(self.attempt);
+        let duration_sec = 1 + 2_u64.pow(min(self.attempt, 8));
         println!("duration sec {duration_sec}");
         let jitter_ms = rand::random_range(0..2000);
         println!("jitter {jitter_ms}");
@@ -53,16 +52,11 @@ impl RetryPolicy for ExponentialRetryPolicy {
 
         RetryDecision::Wait(Duration::from_millis(sleep_duration_ms))
     }
-
-    fn on_success(&mut self) {
-        self.start = DateTime::UNIX_EPOCH;
-    }
 }
 
 pub struct NoRetryPolicy;
 
 impl RetryPolicy for NoRetryPolicy {
-    fn on_success(&mut self) {}
     fn on_failure(&mut self) -> RetryDecision {
         RetryDecision::GiveUp
     }
@@ -76,31 +70,64 @@ pub enum RetryPolicyKind {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{thread::sleep, time::Duration};
 
     use crate::retry::{ExponentialRetryPolicy, RetryDecision, RetryPolicy};
 
     #[test]
     fn test_exponential_policy() {
-        let mut policy = ExponentialRetryPolicy::new();
+        let mut policy = ExponentialRetryPolicy::new(None);
 
-        // 1 + 2^0
+        // 1 + 2^0 = 2
         let decision = policy.on_failure();
-        assert!(decision > RetryDecision::Wait(Duration::from_secs(2)));
-        assert!(decision < RetryDecision::Wait(Duration::from_secs(4)));
+        let RetryDecision::Wait(duration) = decision else {
+            panic!()
+        };
+        assert!(duration >= Duration::from_secs(2));
+        assert!(duration <= Duration::from_secs(4));
+
+        // 1 + 2^1 = 3
+        let decision = policy.on_failure();
+        let RetryDecision::Wait(duration) = decision else {
+            panic!()
+        };
+        assert!(duration >= Duration::from_secs(3));
+        assert!(duration <= Duration::from_secs(5));
+
+        // 1 + 2^7 = 129
+        let _ = policy.on_failure();
+        let _ = policy.on_failure();
+        let _ = policy.on_failure();
+        let _ = policy.on_failure();
+        let _ = policy.on_failure();
+        let decision = policy.on_failure();
+        let RetryDecision::Wait(duration) = decision else {
+            panic!()
+        };
+        // should cap at 120
+        assert_eq!(duration, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn test_happy_timeout_triggers_reset() {
+        let mut policy = ExponentialRetryPolicy::new(Some(1));
 
         // 1 + 2^1
+        let _ = policy.on_failure();
         let decision = policy.on_failure();
-        assert!(decision > RetryDecision::Wait(Duration::from_secs(3)));
-        assert!(decision < RetryDecision::Wait(Duration::from_secs(5)));
+        let RetryDecision::Wait(duration) = decision else {
+            panic!()
+        };
+        assert!(duration >= Duration::from_secs(3));
+        assert!(duration <= Duration::from_secs(5));
 
-        // 1 + 2^7
-        let _ = policy.on_failure();
-        let _ = policy.on_failure();
-        let _ = policy.on_failure();
-        let _ = policy.on_failure();
-        let _ = policy.on_failure();
+        // 1 + 2^0 after reset
+        sleep(Duration::from_secs(1));
         let decision = policy.on_failure();
-        assert_eq!(decision, RetryDecision::Wait(Duration::from_secs(120)));
+        let RetryDecision::Wait(duration) = decision else {
+            panic!()
+        };
+        assert!(duration >= Duration::from_secs(2));
+        assert!(duration <= Duration::from_secs(4));
     }
 }
