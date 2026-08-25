@@ -17,22 +17,30 @@ pub trait RetryPolicy {
 pub struct ExponentialRetryPolicy {
     attempt: u32,
     start: Instant,
-    happy_timeout_sec: u64,
+    reset_after_sec: u64,
+}
+
+impl Default for ExponentialRetryPolicy {
+    fn default() -> Self {
+        ExponentialRetryPolicy::new(ExponentialRetryPolicy::DEFAULT_RESET_AFTER)
+    }
 }
 
 impl ExponentialRetryPolicy {
-    pub fn new(happy_timeout: Option<u64>) -> ExponentialRetryPolicy {
+    const DEFAULT_RESET_AFTER: u64 = 120;
+
+    pub fn new(reset_after: u64) -> ExponentialRetryPolicy {
         ExponentialRetryPolicy {
             attempt: 0,
             start: Instant::now(),
-            happy_timeout_sec: happy_timeout.unwrap_or(120),
+            reset_after_sec: reset_after,
         }
     }
 }
 
 impl RetryPolicy for ExponentialRetryPolicy {
     fn on_failure(&mut self) -> RetryDecision {
-        if self.start.elapsed().as_secs() >= self.happy_timeout_sec {
+        if self.start.elapsed().as_secs() >= self.reset_after_sec {
             self.start = Instant::now();
             self.attempt = 0;
         }
@@ -76,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_exponential_policy() {
-        let mut policy = ExponentialRetryPolicy::new(None);
+        let mut policy = ExponentialRetryPolicy::default();
 
         // 1 + 2^0 = 2
         let decision = policy.on_failure();
@@ -110,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_happy_timeout_triggers_reset() {
-        let mut policy = ExponentialRetryPolicy::new(Some(1));
+        let mut policy = ExponentialRetryPolicy::new(1);
 
         // 1 + 2^1
         let _ = policy.on_failure();

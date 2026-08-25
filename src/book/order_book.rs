@@ -233,12 +233,6 @@ mod tests {
         }
     }
 
-    // fn str_to_i64(s: &str, precision: usize) -> i64 {
-    //     let number = Number::from_str(s).unwrap();
-    //     // TODO: is it ok we use private method here?
-    //     OrderBook::number_to_i64(&number, precision)
-    // }
-
     #[test]
     fn test_order_book_trims_to_depth() {
         let mut book = OrderBook::new(10, 2, 8, false);

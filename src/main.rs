@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let mut retry_policy: Box<dyn RetryPolicy> = match args.retry_policy {
-        RetryPolicyKind::Exponential => Box::new(ExponentialRetryPolicy::new(None)),
+        RetryPolicyKind::Exponential => Box::new(ExponentialRetryPolicy::default()),
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
