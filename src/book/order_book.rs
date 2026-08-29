@@ -21,7 +21,7 @@ pub enum OrderBookError {
     BookEmpty,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct OrderBook {
     depth: usize,
     pair_decimals: usize,

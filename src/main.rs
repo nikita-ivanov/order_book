@@ -45,9 +45,10 @@ async fn main() -> Result<()> {
                 println!("websocket exited cleanly, reconnecting...");
                 continue;
             }
-            Err(_) => match retry_policy.on_failure() {
+            Err(e) => match retry_policy.on_failure() {
                 RetryDecision::Wait(duration) => sleep(duration).await,
                 RetryDecision::GiveUp => {
+                    eprintln!("{:?}", e);
                     return Err(anyhow!("Too many failures, exiting application"));
                 }
             },

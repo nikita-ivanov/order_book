@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn test_happy_timeout_triggers_reset() {
+    fn test_retry_after_sec_triggers_reset() {
         let mut policy = ExponentialRetryPolicy::new(1);
 
         // 1 + 2^1
