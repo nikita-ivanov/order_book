@@ -75,15 +75,15 @@ async fn run_once(args: &Args) -> Result<()> {
     request_channels(&mut tx, &args.symbols, args.depth).await?;
 
     match receiving_loop(&mut rx, &mut order_books).await {
-        Ok(_) => Ok(()),
-        Err(err) => match err {
-            OrderBookError::PrecisionExceeded { precision, number } => {
-                panic!(
-                    "Exchange sent a number with higher precision than expected, which is considered a breaking error.
-                     Precision was {precision} while received number was {number}");
-            }
-            other => return Err(anyhow!("received error during loop: {other:?}")),
-        },
+        Ok(()) => Ok(()),
+        Err(OrderBookError::PrecisionExceeded { precision, number }) => {
+            panic!(
+            "Exchange sent a number with higher precision than expected, which is considered a breaking error.
+            Precision was {precision} while received number was {number}");
+        }
+        Err(other) => {
+            return Err(anyhow!("received error during loop: {other:?}"));
+        }
     }
 }
 
@@ -119,50 +119,93 @@ async fn receiving_loop(
 ) -> Result<(), OrderBookError> {
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
-        // println!("{msg:?}");
-        let message: BookMessage = match msg {
-            Ok(Message::Text(bytes)) => {
-                let info: BasicInfo = match serde_json::from_str(&bytes) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        println!("Error parsing basic info, skipping");
-                        println!("Message was: {bytes:?}");
-                        println!("Errors was: {e:?}");
-                        continue;
-                    }
-                };
-
-                let msg_type = info.parse();
-                match msg_type {
-                    BasicInfoResult::Snapshot | BasicInfoResult::Update => {
-                        match serde_json::from_str(&bytes) {
-                            Ok(result) => result,
-                            Err(e) => {
-                                println!("Error parsing message, will continue");
-                                println!("Message was: {bytes:?}");
-                                println!("Error was: {e:?}");
-                                continue;
-                            }
-                        }
-                    }
-                    _ => {
-                        println!("Skipping message as it does not have order book data");
-                        println!("{bytes:?}");
-                        println!("{}", "-".repeat(50));
-                        continue;
-                    }
-                }
-            }
-            Ok(other) => {
-                println!("Ignoring message: {other:?}");
-                println!("{}", "-".repeat(50));
-                continue;
-            }
+        let msg = match msg {
+            Ok(m) => m,
             Err(e) => {
-                println!("Websocket error, will skip. Error was {e:?}");
+                println!("Websocket error, will skip. Error was: {e:?}");
                 continue;
             }
         };
+
+        let Message::Text(bytes) = msg else {
+            println!("Message was not of the text type, will skip.");
+            continue;
+        };
+
+        // let Ok(info) = serde_json::from_str::<BasicInfo>(&bytes) else {
+        //     println!("Error parsing basic info, skipping");
+        //     println!("Message was: {bytes:?}");
+        //     // println!("Errors was: {e:?}");
+        //     continue;
+        // };
+
+        let info = match serde_json::from_str::<BasicInfo>(&bytes) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                println!("Error parsing basic info, skipping");
+                println!("Message was: {bytes:?}");
+                println!("Errors was: {e:?}");
+                continue;
+            }
+        };
+
+        let (BasicInfoResult::Snapshot | BasicInfoResult::Update) = info.parse() else {
+            println!("Skipping message as it does not have order book data");
+            println!("{bytes:?}");
+            println!("{}", "-".repeat(50));
+            continue;
+        };
+
+        let Ok(message) = serde_json::from_str::<BookMessage>(bytes.as_str()) else {
+            println!("Error parsing message, will continue");
+            println!("Message was: {bytes:?}");
+            // println!("Error was: {e:?}");
+            continue;
+        };
+
+        // let message: BookMessage = match msg {
+        //     Ok(Message::Text(bytes)) => {
+        //         let info: BasicInfo = match serde_json::from_str(&bytes) {
+        //             Ok(result) => result,
+        //             Err(e) => {
+        //                 println!("Error parsing basic info, skipping");
+        //                 println!("Message was: {bytes:?}");
+        //                 println!("Errors was: {e:?}");
+        //                 continue;
+        //             }
+        //         };
+
+        //         let msg_type = info.parse();
+        //         match msg_type {
+        //             BasicInfoResult::Snapshot | BasicInfoResult::Update => {
+        //                 match serde_json::from_str(&bytes) {
+        //                     Ok(result) => result,
+        //                     Err(e) => {
+        //                         println!("Error parsing message, will continue");
+        //                         println!("Message was: {bytes:?}");
+        //                         println!("Error was: {e:?}");
+        //                         continue;
+        //                     }
+        //                 }
+        //             }
+        //             _ => {
+        //                 println!("Skipping message as it does not have order book data");
+        //                 println!("{bytes:?}");
+        //                 println!("{}", "-".repeat(50));
+        //                 continue;
+        //             }
+        //         }
+        //     }
+        //     Ok(other) => {
+        //         println!("Ignoring message: {other:?}");
+        //         println!("{}", "-".repeat(50));
+        //         continue;
+        //     }
+        //     Err(e) => {
+        //         println!("Websocket error, will skip. Error was {e:?}");
+        //         continue;
+        //     }
+        // };
 
         let symbol = &message.data[0].symbol;
         let order_book = match order_books.get_mut(symbol) {
