@@ -214,7 +214,14 @@ async fn receiving_loop(
         };
 
         order_book.apply_update(&message)?;
-        println!("{:?}", order_book.top_of_book());
+
+        if let Ok(top) = order_book.top_of_book() {
+            top.print();
+        }
+
+        println!("--------------------------------");
+        order_book.print();
+        println!("--------------------------------");
     }
     Ok(())
 }
