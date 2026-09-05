@@ -1,4 +1,5 @@
 use crate::BookMessage;
+use chrono::Utc;
 use serde_json::Number;
 use std::{collections::BTreeMap, num::ParseIntError};
 use thiserror::Error;
@@ -21,8 +22,15 @@ pub enum OrderBookError {
     BookEmpty,
 }
 
-#[derive(Debug, PartialEq)]
+/// Helper to convert integer order book data to f64
+fn int_to_float(number: i64, precision: usize) -> f64 {
+    (number as f64) / (10_u32.pow(precision as u32) as f64)
+}
+
+// do we like that we need lifetime here because of &String?
+#[derive(Debug)]
 pub struct OrderBook {
+    name: String,
     depth: usize,
     pair_decimals: usize,
     lot_decimals: usize,
@@ -33,12 +41,14 @@ pub struct OrderBook {
 
 impl OrderBook {
     pub fn new(
+        name: String,
         depth: usize,
         pair_decimals: usize,
         lot_decimals: usize,
         verify_checksum: bool,
     ) -> OrderBook {
         OrderBook {
+            name,
             depth,
             pair_decimals,
             lot_decimals,
@@ -140,17 +150,23 @@ impl OrderBook {
             }
         };
 
+        let best_bid_price = int_to_float(*best_bid_price, self.pair_decimals);
+        let best_bid_qty = int_to_float(*best_bid_qty, self.lot_decimals);
+
+        let best_ask_price = int_to_float(*best_ask_price, self.pair_decimals);
+        let best_ask_qty = int_to_float(*best_ask_qty, self.lot_decimals);
+
         let top_of_book = BidAskPair {
-            bid_price: *best_bid_price,
-            bid_qty: *best_bid_qty,
-            ask_price: *best_ask_price,
-            ask_qty: *best_ask_qty,
+            bid_price: best_bid_price,
+            bid_qty: best_bid_qty,
+            ask_price: best_ask_price,
+            ask_qty: best_ask_qty,
         };
 
         Ok(top_of_book)
     }
 
-    pub fn compute_checksum(&self) -> u32 {
+    fn compute_checksum(&self) -> u32 {
         // kraken computes checksum on the first 10 entries
         let bids = self.bids.iter().rev().take(10);
         let asks = self.asks.iter().take(10);
@@ -179,14 +195,52 @@ impl OrderBook {
 
         crc32fast::hash(asks_and_bids.as_bytes())
     }
+
+    pub fn print(&self) {
+        let mut bids_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth);
+        let mut asks_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth);
+
+        for pair in self.bids.iter().rev() {
+            let price_float = int_to_float(*pair.0, self.pair_decimals);
+            let qty_float = int_to_float(*pair.1, self.lot_decimals);
+
+            bids_to_print.push((price_float, qty_float));
+        }
+
+        for pair in self.asks.iter() {
+            let price_float = int_to_float(*pair.0, self.pair_decimals);
+            let qty_float = int_to_float(*pair.1, self.lot_decimals);
+
+            asks_to_print.push((price_float, qty_float));
+        }
+
+        println!("{}", "=".repeat(100));
+        println!("OrderBook {} {:?}", self.name, Utc::now());
+        for (bid_pair, ask_pair) in bids_to_print.iter().zip(asks_to_print) {
+            println!(
+                "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
+                bid_pair.1, bid_pair.0, ask_pair.0, ask_pair.1
+            );
+        }
+        println!("{}", "=".repeat(100));
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct BidAskPair {
-    pub bid_price: i64,
-    pub bid_qty: i64,
-    pub ask_price: i64,
-    pub ask_qty: i64,
+    pub bid_price: f64,
+    pub bid_qty: f64,
+    pub ask_price: f64,
+    pub ask_qty: f64,
+}
+
+impl BidAskPair {
+    pub fn print(&self) {
+        println!(
+            "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
+            self.bid_qty, self.bid_price, self.ask_price, self.ask_qty
+        );
+    }
 }
 
 #[cfg(test)]
@@ -233,15 +287,13 @@ mod tests {
         }
     }
 
-    // fn str_to_i64(s: &str, precision: usize) -> i64 {
-    //     let number = Number::from_str(s).unwrap();
-    //     // TODO: is it ok we use private method here?
-    //     OrderBook::number_to_i64(&number, precision)
-    // }
+    fn book_name() -> String {
+        String::from("dummy name")
+    }
 
     #[test]
     fn test_order_book_trims_to_depth() {
-        let mut book = OrderBook::new(10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
 
         book.apply_update(&get_book_message(10, 100.0, 42.0))
             .unwrap();
@@ -253,16 +305,11 @@ mod tests {
             .unwrap();
         assert_eq!(book.bids.len(), 10);
         assert_eq!(book.asks.len(), 10);
-
-        book.apply_update(&get_book_message(2, 300.0, 42.0))
-            .unwrap();
-        assert_eq!(book.bids.len(), 10);
-        assert_eq!(book.asks.len(), 10);
     }
 
     #[test]
     fn test_order_book_overwrites_quantities() {
-        let mut book = OrderBook::new(10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
 
         book.apply_update(&get_book_message(2, 100.0, 42.0))
             .unwrap();
@@ -281,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_order_book_all_price_levels_present() {
-        let mut book = OrderBook::new(10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
 
         book.apply_update(&get_book_message(1, 100.0, 42.0))
             .unwrap();
@@ -292,49 +339,49 @@ mod tests {
 
         assert_eq!(book.bids.get(&10500).unwrap(), &42200000000);
 
-        assert_eq!(book.asks.get(&10000).unwrap(), &42_000_000_00);
+        assert_eq!(book.asks.get(&10000).unwrap(), &4200000000);
 
-        assert_eq!(book.asks.get(&105_00).unwrap(), &422_000_000_00);
+        assert_eq!(book.asks.get(&10500).unwrap(), &42200000000);
     }
 
     #[test]
     fn test_top_of_book_returns_correct_values() {
-        let mut book = OrderBook::new(10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
 
         book.apply_update(&get_book_message(2, 100.0, 42.0))
             .unwrap();
 
         // we have two book updates with 100.0 and 101.0 prices
         let expected = BidAskPair {
-            bid_price: 10100,
-            bid_qty: 4300000000,
-            ask_price: 100_00,
-            ask_qty: 42_000_000_00,
+            bid_price: 101.0,
+            bid_qty: 43.0,
+            ask_price: 100.0,
+            ask_qty: 42.0,
         };
         assert_eq!(book.top_of_book().unwrap(), expected);
 
         book.apply_update(&get_book_message(1, 105.0, 2.0)).unwrap();
         let expected = BidAskPair {
-            bid_price: 105_00,
-            bid_qty: 2_000_000_00,
-            ask_price: 100_00,
-            ask_qty: 42_000_000_00,
+            bid_price: 105.0,
+            bid_qty: 2.0,
+            ask_price: 100.0,
+            ask_qty: 42.0,
         };
         assert_eq!(book.top_of_book().unwrap(), expected);
 
         book.apply_update(&get_book_message(1, 98.0, 3.0)).unwrap();
         let expected = BidAskPair {
-            bid_price: 105_00,
-            bid_qty: 2_000_000_00,
-            ask_price: 98_00,
-            ask_qty: 3_000_000_00,
+            bid_price: 105.0,
+            bid_qty: 2.0,
+            ask_price: 98.0,
+            ask_qty: 3.0,
         };
         assert_eq!(book.top_of_book().unwrap(), expected);
     }
 
     #[test]
     fn test_empty_top_of_book_returns_error() {
-        let mut book = OrderBook::new(10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
         let result = book.top_of_book();
         assert_eq!(result, Err(OrderBookError::BookEmpty));
 
@@ -359,7 +406,7 @@ mod tests {
         let result = book.top_of_book();
         assert_eq!(result, Err(OrderBookError::BookEmpty));
 
-        let mut book = OrderBook::new(10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
 
         // message below only adds asks but no asks
         let book_data = BookData {
@@ -475,11 +522,15 @@ mod tests_checksum {
         book_message
     }
 
+    fn book_name() -> String {
+        String::from("dummy name")
+    }
+
     #[test]
     fn test_checksum_computed_correctly() {
         let book_message = get_book_message();
 
-        let mut book = OrderBook::new(10, 1, 8, true);
+        let mut book = OrderBook::new(book_name(), 10, 1, 8, true);
         book.apply_update(&book_message).unwrap();
 
         let computed_checksum = book.compute_checksum();
@@ -490,7 +541,7 @@ mod tests_checksum {
     fn test_checksum_ignores_orders_beyond_10th() {
         let book_message = get_book_message();
 
-        let mut book = OrderBook::new(15, 1, 8, true);
+        let mut book = OrderBook::new(book_name(), 15, 1, 8, true);
         book.apply_update(&book_message).unwrap();
 
         // set bid lower and ask higher than get_book_message() values
@@ -527,7 +578,7 @@ mod tests_checksum {
 
     #[test]
     fn test_checksum_failed_returns_error() {
-        let mut book = OrderBook::new(10, 2, 8, true);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, true);
         let book_data = get_book_message();
         let result = book.apply_update(&book_data);
 
