@@ -1,4 +1,5 @@
 use crate::BookMessage;
+use chrono::Utc;
 use serde_json::Number;
 use std::{collections::BTreeMap, num::ParseIntError};
 use thiserror::Error;
@@ -21,8 +22,10 @@ pub enum OrderBookError {
     BookEmpty,
 }
 
+// do we like that we need lifetime here because of &String?
 #[derive(Debug)]
 pub struct OrderBook {
+    name: String,
     depth: usize,
     pair_decimals: usize,
     lot_decimals: usize,
@@ -33,12 +36,14 @@ pub struct OrderBook {
 
 impl OrderBook {
     pub fn new(
+        name: String,
         depth: usize,
         pair_decimals: usize,
         lot_decimals: usize,
         verify_checksum: bool,
     ) -> OrderBook {
         OrderBook {
+            name,
             depth,
             pair_decimals,
             lot_decimals,
@@ -210,12 +215,15 @@ impl OrderBook {
             asks_to_print.push((price_float, qty_float));
         }
 
+        println!("{}", "=".repeat(100));
+        println!("OrderBook {} {:?}", self.name, Utc::now());
         for (bid_pair, ask_pair) in bids_to_print.iter().zip(asks_to_print) {
             println!(
-                "q_bid={:.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:.2}",
+                "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
                 bid_pair.1, bid_pair.0, ask_pair.0, ask_pair.1
             );
         }
+        println!("{}", "=".repeat(100));
     }
 }
 
@@ -230,7 +238,7 @@ pub struct BidAskPair {
 impl BidAskPair {
     pub fn print(&self) {
         println!(
-            "q_bid={:.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:.2}",
+            "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
             self.bid_qty, self.bid_price, self.ask_price, self.ask_qty
         );
     }
