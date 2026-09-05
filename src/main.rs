@@ -82,9 +82,7 @@ async fn run_once(args: &Args) -> Result<()> {
             "Exchange sent a number with higher precision than expected, which is considered a breaking error.
             Precision was {precision} while received number was {number}");
         }
-        Err(other) => {
-            return Err(anyhow!("received error during loop: {other:?}"));
-        }
+        Err(other) => Err(anyhow!("received error during loop: {other:?}")),
     }
 }
 
