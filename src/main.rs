@@ -40,12 +40,14 @@ async fn main() -> Result<()> {
 
     loop {
         match run_once(&mut feed).await {
-            Ok(_) => {}
+            Ok(_) => continue,
+
             Err(e) => match retry_policy.on_failure() {
                 RetryDecision::Wait(duration) => {
                     println!("Encountered error, will retry. Error was: {e:?}");
                     sleep(duration).await
                 }
+
                 RetryDecision::GiveUp => {
                     println!("{:?}", e);
                     return Err(anyhow!("Too many failures, exiting application"));
@@ -105,26 +107,55 @@ async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<()> 
         };
 
         match feed.process(msg) {
-            Ok(_) => {
+            Ok(()) => {
                 for (_, ob) in feed.order_books.iter() {
                     ob.print();
                 }
 
                 continue;
             }
-            Err(KrakenFeedError::UnknownMessage { message }) => continue,
-            Err(KrakenFeedError::BookEmpty) => continue,
-            Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
-                panic!(
-            "Exchange sent a number with higher precision than expected, which is considered a breaking error.
-            Precision was {precision} while received number was {number}");
-            }
-            other => anyhow!("{other:?}"),
-        };
 
-        // if let Ok(top) = order_book.top_of_book() {
-        //     top.print();
-        // }
+            Err(KrakenFeedError::UnknownMessage { message }) => {
+                println!("Unknown message, will skip.\n{message:?}");
+                continue;
+            }
+
+            Err(KrakenFeedError::BookEmpty) => {
+                // this is unreachable
+                continue;
+            }
+
+            Err(KrakenFeedError::InvalidNumber { number, source }) => {
+                println!(
+                    "Received invalid number during parsing: {number:?}. Parsing error was {source:?}. Will skip."
+                );
+                continue;
+            }
+
+            Err(KrakenFeedError::DeserializationError { message }) => {
+                println!("Failed to deserialize message. Will skip. Message was {message:?}");
+                continue;
+            }
+
+            Err(KrakenFeedError::ChecksumMismatch { computed, received }) => {
+                anyhow!(
+                    "Checksum mismatch: received {received:?} vs. computed {computed:?}. Try to reconnect."
+                )
+            }
+
+            Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
+                anyhow!(
+                    "Exchange sent a number with higher precision than expected, which is considered a breaking error.
+                    Precision was {precision} while received number was {number}"
+                )
+            }
+
+            Err(KrakenFeedError::OrderBookError { source }) => {
+                anyhow!(
+                    "Error during order book processing, try to reconnect. Error was\n{source:?}"
+                )
+            }
+        };
     }
 
     Err(anyhow!("websocket exited, try to reconnect"))
