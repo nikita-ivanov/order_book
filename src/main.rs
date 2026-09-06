@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use futures_util::{
@@ -7,9 +6,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
 };
 use kraken_l3::{
-    BasicInfo, BasicInfoResult, BookMessage,
-    book::order_book::{OrderBook, OrderBookError},
-    precision::get_precision,
+    kraken::feed::{KrakenFeed, KrakenFeedError},
     retry::{ExponentialRetryPolicy, NoRetryPolicy, RetryDecision, RetryPolicy, RetryPolicyKind},
 };
 use tokio::{net::TcpStream, time::sleep};
@@ -39,14 +36,19 @@ async fn main() -> Result<()> {
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
+    let mut feed = KrakenFeed::new(&args.symbols[..], args.depth as u16).await?;
+
     loop {
-        match run_once(&args).await {
+        match run_once(&mut feed).await {
             Ok(_) => {
                 println!("websocket exited cleanly, reconnecting...");
                 continue;
             }
             Err(e) => match retry_policy.on_failure() {
-                RetryDecision::Wait(duration) => sleep(duration).await,
+                RetryDecision::Wait(duration) => {
+                    println!("Encountered error, will retry. Error was: {e:?}");
+                    sleep(duration).await
+                }
                 RetryDecision::GiveUp => {
                     println!("{:?}", e);
                     return Err(anyhow!("Too many failures, exiting application"));
@@ -56,28 +58,15 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn run_once(args: &Args) -> Result<()> {
+async fn run_once(feed: &mut KrakenFeed) -> Result<()> {
     let ws = connect().await?;
     let (mut tx, mut rx) = ws.split();
-    let precisions = get_precision(&args.symbols).await?;
 
-    let mut order_books = HashMap::new();
-    for (symbol, precision) in precisions.iter() {
-        let ob = OrderBook::new(
-            String::from(symbol),
-            args.depth,
-            precision.pair_decimals,
-            precision.lot_decimals,
-            true,
-        );
-        order_books.insert(symbol, ob);
-    }
+    request_channels(&mut tx, &feed.symbols, feed.depth as usize).await?;
 
-    request_channels(&mut tx, &args.symbols, args.depth).await?;
-
-    match receiving_loop(&mut rx, &mut order_books).await {
+    match receiving_loop(&mut rx, &mut *feed).await {
         Ok(()) => Ok(()),
-        Err(OrderBookError::PrecisionExceeded { precision, number }) => {
+        Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
             panic!(
             "Exchange sent a number with higher precision than expected, which is considered a breaking error.
             Precision was {precision} while received number was {number}");
@@ -112,10 +101,7 @@ async fn request_channels(tx: &mut Transmitter, symbols: &Vec<String>, depth: us
     Ok(())
 }
 
-async fn receiving_loop(
-    rx: &mut Receiver,
-    order_books: &mut HashMap<&String, OrderBook>,
-) -> Result<(), OrderBookError> {
+async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<(), KrakenFeedError> {
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
         let msg = match msg {
@@ -126,52 +112,15 @@ async fn receiving_loop(
             }
         };
 
-        let Message::Text(bytes) = msg else {
-            println!("Message was not of the text type, will skip. {msg:?}");
-            continue;
-        };
-
-        let info = match serde_json::from_str::<BasicInfo>(&bytes) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                println!("Error parsing basic info, skipping");
-                println!("Message was: {bytes:?}");
-                println!("Errors was: {e:?}");
-                continue;
-            }
-        };
-
-        // could be a match here to print the result of parse()?
-        let (BasicInfoResult::Snapshot | BasicInfoResult::Update) = info.parse() else {
-            println!("Skipping message as it does not have order book data");
-            println!("{bytes:?}");
-            println!("{}", "-".repeat(50));
-            continue;
-        };
-
-        let message = match serde_json::from_str::<BookMessage>(bytes.as_str()) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("Error parsing message, will continue");
-                eprintln!("Message was: {bytes:?}");
-                eprintln!("Error was: {e:?}");
-                continue;
-            }
-        };
-
-        let symbol = &message.data[0].symbol;
-        let order_book = match order_books.get_mut(symbol) {
-            Some(book) => book,
-            None => panic!("could not find order book"),
-        };
-
-        order_book.apply_update(&message)?;
+        feed.process(msg)?;
 
         // if let Ok(top) = order_book.top_of_book() {
         //     top.print();
         // }
 
-        order_book.print();
+        for (_, ob) in feed.order_books.iter() {
+            ob.print();
+        }
     }
     Ok(())
 }

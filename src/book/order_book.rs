@@ -40,14 +40,14 @@ pub struct OrderBook {
 
 #[derive(Debug)]
 pub struct Level {
-    price: i64,
-    quantity: i64,
+    pub price: i64,
+    pub quantity: i64,
 }
 
 #[derive(Debug)]
 pub struct BookUpdate {
-    bids: Option<Vec<Level>>,
-    asks: Option<Vec<Level>>,
+    pub bids: Option<Vec<Level>>,
+    pub asks: Option<Vec<Level>>,
 }
 
 impl OrderBook {
@@ -67,39 +67,6 @@ impl OrderBook {
             bids: BTreeMap::new(),
             verify_checksum,
         }
-    }
-
-    fn number_to_i64(number: &Number, precision: usize) -> Result<i64, OrderBookError> {
-        let number_string = number.to_string();
-
-        let (int_part, frac_part) = match number_string.split_once(".") {
-            Some(split) => split,
-            None => (number_string.as_str(), "0"),
-        };
-
-        let first_part = String::from(int_part);
-        let mut second_part = String::from(frac_part);
-
-        // receiving more digits than expected is considered an error
-        if second_part.len() > precision {
-            return Err(OrderBookError::PrecisionExceeded {
-                precision,
-                number: number.to_string(),
-            });
-        }
-
-        while second_part.len() < precision {
-            second_part += "0";
-        }
-
-        let combined = first_part + &second_part;
-
-        combined
-            .parse::<i64>()
-            .map_err(|error| OrderBookError::InvalidNumber {
-                number: number_string,
-                source: error,
-            })
     }
 
     pub fn apply_update(&mut self, update: BookUpdate) -> Result<(), OrderBookError> {
