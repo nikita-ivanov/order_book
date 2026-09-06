@@ -40,10 +40,7 @@ async fn main() -> Result<()> {
 
     loop {
         match run_once(&mut feed).await {
-            Ok(_) => {
-                println!("websocket exited cleanly, reconnecting...");
-                continue;
-            }
+            Ok(_) => {}
             Err(e) => match retry_policy.on_failure() {
                 RetryDecision::Wait(duration) => {
                     println!("Encountered error, will retry. Error was: {e:?}");
@@ -66,12 +63,7 @@ async fn run_once(feed: &mut KrakenFeed) -> Result<()> {
 
     match receiving_loop(&mut rx, &mut *feed).await {
         Ok(()) => Ok(()),
-        Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
-            panic!(
-            "Exchange sent a number with higher precision than expected, which is considered a breaking error.
-            Precision was {precision} while received number was {number}");
-        }
-        Err(other) => Err(anyhow!("received error during loop: {other:?}")),
+        Err(other) => Err(anyhow!("received unexpected error during loop: {other:?}")),
     }
 }
 
@@ -101,7 +93,7 @@ async fn request_channels(tx: &mut Transmitter, symbols: &Vec<String>, depth: us
     Ok(())
 }
 
-async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<(), KrakenFeedError> {
+async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<()> {
     // TODO handle update/snapshot messages differently?
     while let Some(msg) = rx.next().await {
         let msg = match msg {
@@ -112,15 +104,28 @@ async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<(), 
             }
         };
 
-        feed.process(msg)?;
+        match feed.process(msg) {
+            Ok(_) => {
+                for (_, ob) in feed.order_books.iter() {
+                    ob.print();
+                }
+
+                continue;
+            }
+            Err(KrakenFeedError::UnknownMessage { message }) => continue,
+            Err(KrakenFeedError::BookEmpty) => continue,
+            Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
+                panic!(
+            "Exchange sent a number with higher precision than expected, which is considered a breaking error.
+            Precision was {precision} while received number was {number}");
+            }
+            other => anyhow!("{other:?}"),
+        };
 
         // if let Ok(top) = order_book.top_of_book() {
         //     top.print();
         // }
-
-        for (_, ob) in feed.order_books.iter() {
-            ob.print();
-        }
     }
-    Ok(())
+
+    Err(anyhow!("websocket exited, try to reconnect"))
 }
