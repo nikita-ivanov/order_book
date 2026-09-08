@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
-    let mut feed = KrakenFeed::new(&args.symbols[..], args.depth as u16).await?;
+    let mut feed = KrakenFeed::new(&args.symbols[..], args.depth as u16, true).await?;
 
     loop {
         match run_once(&mut feed).await {
@@ -107,10 +107,10 @@ async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<()> 
         };
 
         match feed.process(msg) {
-            Ok(()) => {
-                for (_, ob) in feed.order_books.iter() {
-                    ob.print();
-                }
+            Ok(ob) => {
+                // for (_, ob) in feed.order_books.iter() {
+                //     ob.print();
+                // }
 
                 continue;
             }

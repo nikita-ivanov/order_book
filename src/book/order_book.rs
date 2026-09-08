@@ -1,5 +1,3 @@
-use chrono::Utc;
-use serde_json::Number;
 use std::{collections::BTreeMap, num::ParseIntError};
 use thiserror::Error;
 
@@ -29,13 +27,10 @@ fn int_to_float(number: i64, precision: usize) -> f64 {
 // do we like that we need lifetime here because of &String?
 #[derive(Debug)]
 pub struct OrderBook {
-    name: String,
-    depth: usize,
-    pair_decimals: usize,
-    lot_decimals: usize,
-    bids: BTreeMap<i64, i64>,
-    asks: BTreeMap<i64, i64>,
-    verify_checksum: bool,
+    pub name: String,
+    pub depth: u16,
+    pub bids: BTreeMap<i64, i64>,
+    pub asks: BTreeMap<i64, i64>,
 }
 
 #[derive(Debug)]
@@ -51,21 +46,12 @@ pub struct BookUpdate {
 }
 
 impl OrderBook {
-    pub fn new(
-        name: String,
-        depth: usize,
-        pair_decimals: usize,
-        lot_decimals: usize,
-        verify_checksum: bool,
-    ) -> OrderBook {
+    pub fn new(name: String, depth: u16) -> OrderBook {
         OrderBook {
             name,
             depth,
-            pair_decimals,
-            lot_decimals,
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
-            verify_checksum,
         }
     }
 
@@ -88,11 +74,11 @@ impl OrderBook {
             }
         }
 
-        while self.bids.len() > self.depth {
+        while self.bids.len() as u16 > self.depth {
             self.bids.pop_first();
         }
 
-        while self.asks.len() > self.depth {
+        while self.asks.len() as u16 > self.depth {
             self.asks.pop_last();
         }
 
@@ -109,96 +95,66 @@ impl OrderBook {
         Ok(())
     }
 
-    pub fn top_of_book(&self) -> Result<BidAskPair, OrderBookError> {
-        // TODO: should we instead store reversed bids and use first_key_value()?
-        let (best_bid_price, best_bid_qty) = match self.bids.last_key_value() {
-            Some(x) => x,
-            None => {
-                return Err(OrderBookError::BookEmpty);
-            }
-        };
+    // pub fn top_of_book(&self) -> Result<BidAskPair, OrderBookError> {
+    //     // TODO: should we instead store reversed bids and use first_key_value()?
+    //     let (best_bid_price, best_bid_qty) = match self.bids.last_key_value() {
+    //         Some(x) => x,
+    //         None => {
+    //             return Err(OrderBookError::BookEmpty);
+    //         }
+    //     };
+    //
+    //     let (best_ask_price, best_ask_qty) = match self.asks.first_key_value() {
+    //         Some(x) => x,
+    //         None => {
+    //             return Err(OrderBookError::BookEmpty);
+    //         }
+    //     };
+    //
+    //     let best_bid_price = int_to_float(*best_bid_price, self.pair_decimals);
+    //     let best_bid_qty = int_to_float(*best_bid_qty, self.lot_decimals);
+    //
+    //     let best_ask_price = int_to_float(*best_ask_price, self.pair_decimals);
+    //     let best_ask_qty = int_to_float(*best_ask_qty, self.lot_decimals);
+    //
+    //     let top_of_book = BidAskPair {
+    //         bid_price: best_bid_price,
+    //         bid_qty: best_bid_qty,
+    //         ask_price: best_ask_price,
+    //         ask_qty: best_ask_qty,
+    //     };
+    //
+    //     Ok(top_of_book)
+    // }
 
-        let (best_ask_price, best_ask_qty) = match self.asks.first_key_value() {
-            Some(x) => x,
-            None => {
-                return Err(OrderBookError::BookEmpty);
-            }
-        };
-
-        let best_bid_price = int_to_float(*best_bid_price, self.pair_decimals);
-        let best_bid_qty = int_to_float(*best_bid_qty, self.lot_decimals);
-
-        let best_ask_price = int_to_float(*best_ask_price, self.pair_decimals);
-        let best_ask_qty = int_to_float(*best_ask_qty, self.lot_decimals);
-
-        let top_of_book = BidAskPair {
-            bid_price: best_bid_price,
-            bid_qty: best_bid_qty,
-            ask_price: best_ask_price,
-            ask_qty: best_ask_qty,
-        };
-
-        Ok(top_of_book)
-    }
-
-    fn compute_checksum(&self) -> u32 {
-        // kraken computes checksum on the first 10 entries
-        let bids = self.bids.iter().rev().take(10);
-        let asks = self.asks.iter().take(10);
-
-        let mut concatenated_asks = String::new();
-        for ask in asks {
-            let (price, qty) = ask;
-            let parsed_price = price.to_string();
-            let parsed_qty = qty.to_string();
-
-            concatenated_asks.push_str(&parsed_price);
-            concatenated_asks.push_str(&parsed_qty);
-        }
-
-        let mut concatenated_bids = String::new();
-        for bid in bids {
-            let (price, qty) = bid;
-            let parsed_price = price.to_string();
-            let parsed_qty = qty.to_string();
-
-            concatenated_bids.push_str(&parsed_price);
-            concatenated_bids.push_str(&parsed_qty);
-        }
-
-        let asks_and_bids = concatenated_asks + &concatenated_bids[..];
-
-        crc32fast::hash(asks_and_bids.as_bytes())
-    }
-
-    pub fn print(&self) {
-        let mut bids_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth);
-        let mut asks_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth);
-
-        for pair in self.bids.iter().rev() {
-            let price_float = int_to_float(*pair.0, self.pair_decimals);
-            let qty_float = int_to_float(*pair.1, self.lot_decimals);
-
-            bids_to_print.push((price_float, qty_float));
-        }
-
-        for pair in self.asks.iter() {
-            let price_float = int_to_float(*pair.0, self.pair_decimals);
-            let qty_float = int_to_float(*pair.1, self.lot_decimals);
-
-            asks_to_print.push((price_float, qty_float));
-        }
-
-        println!("{}", "=".repeat(100));
-        println!("OrderBook {} {:?}", self.name, Utc::now());
-        for (bid_pair, ask_pair) in bids_to_print.iter().zip(asks_to_print) {
-            println!(
-                "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
-                bid_pair.1, bid_pair.0, ask_pair.0, ask_pair.1
-            );
-        }
-        println!("{}", "=".repeat(100));
-    }
+    // pub fn print(&self) {
+    //     let mut bids_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth as usize);
+    //     let mut asks_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth as usize);
+    //
+    //     for pair in self.bids.iter().rev() {
+    //         let price_float = int_to_float(*pair.0, self.pair_decimals);
+    //         let qty_float = int_to_float(*pair.1, self.lot_decimals);
+    //
+    //         bids_to_print.push((price_float, qty_float));
+    //     }
+    //
+    //     for pair in self.asks.iter() {
+    //         let price_float = int_to_float(*pair.0, self.pair_decimals);
+    //         let qty_float = int_to_float(*pair.1, self.lot_decimals);
+    //
+    //         asks_to_print.push((price_float, qty_float));
+    //     }
+    //
+    //     println!("{}", "=".repeat(100));
+    //     println!("OrderBook {} {:?}", self.name, Utc::now());
+    //     for (bid_pair, ask_pair) in bids_to_print.iter().zip(asks_to_print) {
+    //         println!(
+    //             "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
+    //             bid_pair.1, bid_pair.0, ask_pair.0, ask_pair.1
+    //         );
+    //     }
+    //     println!("{}", "=".repeat(100));
+    // }
 }
 
 #[derive(Debug, PartialEq)]
@@ -286,9 +242,9 @@ mod tests {
 
     #[test]
     fn test_order_book_trims_to_depth() {
-        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10);
 
-        let update = get_update(1, 100, 42);
+        let update = get_update(10, 100, 42);
         book.apply_update(update).unwrap();
         assert_eq!(book.bids.len(), 10);
         assert_eq!(book.asks.len(), 10);
@@ -302,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_order_book_overwrites_quantities() {
-        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10);
 
         let update = get_update(2, 100, 42);
         book.apply_update(update).unwrap();
@@ -310,7 +266,7 @@ mod tests {
         let update = get_update(2, 100, 42);
         book.apply_update(update).unwrap();
 
-        let expected_qty = 24;
+        let expected_qty = 42;
 
         let bid_level = book.bids.get(&100).unwrap();
 
@@ -322,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_order_book_all_price_levels_present() {
-        let mut book = OrderBook::new(book_name(), 10, 2, 8, false);
+        let mut book = OrderBook::new(book_name(), 10);
 
         let update = get_update(1, 100, 42);
         book.apply_update(update).unwrap();
@@ -457,130 +413,3 @@ mod tests {
     //     assert_eq!(parsed, 10010);
     // }
 }
-
-// #[cfg(test)]
-// mod tests_checksum {
-//     use std::str::FromStr;
-//
-//     use crate::book::{
-//         models::{BookData, Quote},
-//         order_book::OrderBookError,
-//     };
-//     use chrono::DateTime;
-//     use serde_json::Number;
-//
-//     use crate::{BookMessage, book::order_book::OrderBook};
-//
-//     fn get_book_message() -> BookMessage {
-//         // from kraken docs: https://docs.kraken.com/exchange/guides/websockets/book-checksum-v2
-//         let msg = serde_json::json!(
-//             {
-//             "channel": "book",
-//             "type": "snapshot",
-//             "data": [{
-//                 "symbol": "BTC/USD",
-//                 "bids": [
-//                 {"price": 45283.5, "qty": 0.10000000},
-//                 {"price": 45283.4, "qty": 1.54582015},
-//                 {"price": 45282.1, "qty": 0.10000000},
-//                 {"price": 45281.0, "qty": 0.10000000},
-//                 {"price": 45280.3, "qty": 1.54592586},
-//                 {"price": 45279.0, "qty": 0.07990000},
-//                 {"price": 45277.6, "qty": 0.03310103},
-//                 {"price": 45277.5, "qty": 0.30000000},
-//                 {"price": 45277.3, "qty": 1.54602737},
-//                 {"price": 45276.6, "qty": 0.15445238}
-//                 ],
-//                 "asks": [
-//                 {"price": 45285.2, "qty": 0.00100000},
-//                 {"price": 45286.4, "qty": 1.54571953},
-//                 {"price": 45286.6, "qty": 1.54571109},
-//                 {"price": 45289.6, "qty": 1.54560911},
-//                 {"price": 45290.2, "qty": 0.15890660},
-//                 {"price": 45291.8, "qty": 1.54553491},
-//                 {"price": 45294.7, "qty": 0.04454749},
-//                 {"price": 45296.1, "qty": 0.35380000},
-//                 {"price": 45297.5, "qty": 0.09945542},
-//                 {"price": 45299.5, "qty": 0.18772827}
-//                 ],
-//                 "checksum": 3310070434_u32,
-//                 "timestamp": chrono::prelude::Utc::now()
-//             }]
-//             }
-//         );
-//
-//         let book_message: BookMessage = serde_json::from_slice(msg.to_string().as_bytes()).unwrap();
-//
-//         book_message
-//     }
-//
-//     fn book_name() -> String {
-//         String::from("dummy name")
-//     }
-//
-//     #[test]
-//     fn test_checksum_computed_correctly() {
-//         let book_message = get_book_message();
-//
-//         let mut book = OrderBook::new(book_name(), 10, 1, 8, true);
-//         book.apply_update(&book_message).unwrap();
-//
-//         let computed_checksum = book.compute_checksum();
-//         assert_eq!(computed_checksum, book_message.data[0].checksum);
-//     }
-//
-//     #[test]
-//     fn test_checksum_ignores_orders_beyond_10th() {
-//         let book_message = get_book_message();
-//
-//         let mut book = OrderBook::new(book_name(), 15, 1, 8, true);
-//         book.apply_update(&book_message).unwrap();
-//
-//         // set bid lower and ask higher than get_book_message() values
-//         // to make sure they end up in the tail (11th position) and are ingored
-//         let book_data = BookData {
-//             symbol: String::from("X"),
-//             bids: Vec::from([Quote {
-//                 price: Number::from_str("5.0").unwrap(),
-//                 qty: Number::from_str("5.0").unwrap(),
-//             }]),
-//             asks: Vec::from([Quote {
-//                 price: Number::from_str("1500000.0").unwrap(),
-//                 qty: Number::from_str("5.0").unwrap(),
-//             }]),
-//             // the checksum on the new message should still be the same since it represents current
-//             // oder book
-//             checksum: book_message.data[0].checksum,
-//             timestamp: DateTime::parse_from_rfc3339("2026-06-26T11:00:00+02:00")
-//                 .unwrap()
-//                 .to_utc(),
-//         };
-//
-//         let new_message = BookMessage {
-//             channel: String::from("book"),
-//             r#type: String::from("update"),
-//             data: [book_data],
-//         };
-//
-//         book.apply_update(&new_message).unwrap();
-//
-//         let computed_checksum = book.compute_checksum();
-//         assert_eq!(computed_checksum, book_message.data[0].checksum);
-//     }
-//
-//     #[test]
-//     fn test_checksum_failed_returns_error() {
-//         let mut book = OrderBook::new(book_name(), 10, 2, 8, true);
-//         let book_data = get_book_message();
-//         let result = book.apply_update(&book_data);
-//
-//         // get_book_message() returns dummy checksum which will not match correct one
-//         assert_eq!(
-//             result,
-//             Err(OrderBookError::ChecksumMismatch {
-//                 computed: book.compute_checksum(),
-//                 received: book_data.data[0].checksum
-//             })
-//         )
-//     }
-// }
