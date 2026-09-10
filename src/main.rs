@@ -108,9 +108,7 @@ async fn receiving_loop(rx: &mut Receiver, feed: &mut KrakenFeed) -> Result<()> 
 
         match feed.process(msg) {
             Ok(ob) => {
-                // for (_, ob) in feed.order_books.iter() {
-                //     ob.print();
-                // }
+                ob.print();
 
                 continue;
             }

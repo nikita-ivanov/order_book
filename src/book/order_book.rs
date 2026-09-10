@@ -1,3 +1,4 @@
+use chrono::Utc;
 use std::{collections::BTreeMap, num::ParseIntError};
 use thiserror::Error;
 
@@ -31,6 +32,8 @@ pub struct OrderBook {
     pub depth: u16,
     pub bids: BTreeMap<i64, i64>,
     pub asks: BTreeMap<i64, i64>,
+    pub pair_decimals: usize,
+    pub lot_decimals: usize,
 }
 
 #[derive(Debug)]
@@ -46,10 +49,12 @@ pub struct BookUpdate {
 }
 
 impl OrderBook {
-    pub fn new(name: String, depth: u16) -> OrderBook {
+    pub fn new(name: String, depth: u16, pair_decimals: usize, lot_decimals: usize) -> OrderBook {
         OrderBook {
             name,
             depth,
+            pair_decimals,
+            lot_decimals,
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
         }
@@ -127,34 +132,34 @@ impl OrderBook {
     //     Ok(top_of_book)
     // }
 
-    // pub fn print(&self) {
-    //     let mut bids_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth as usize);
-    //     let mut asks_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth as usize);
-    //
-    //     for pair in self.bids.iter().rev() {
-    //         let price_float = int_to_float(*pair.0, self.pair_decimals);
-    //         let qty_float = int_to_float(*pair.1, self.lot_decimals);
-    //
-    //         bids_to_print.push((price_float, qty_float));
-    //     }
-    //
-    //     for pair in self.asks.iter() {
-    //         let price_float = int_to_float(*pair.0, self.pair_decimals);
-    //         let qty_float = int_to_float(*pair.1, self.lot_decimals);
-    //
-    //         asks_to_print.push((price_float, qty_float));
-    //     }
-    //
-    //     println!("{}", "=".repeat(100));
-    //     println!("OrderBook {} {:?}", self.name, Utc::now());
-    //     for (bid_pair, ask_pair) in bids_to_print.iter().zip(asks_to_print) {
-    //         println!(
-    //             "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
-    //             bid_pair.1, bid_pair.0, ask_pair.0, ask_pair.1
-    //         );
-    //     }
-    //     println!("{}", "=".repeat(100));
-    // }
+    pub fn print(&self) {
+        let mut bids_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth as usize);
+        let mut asks_to_print: Vec<(f64, f64)> = Vec::with_capacity(self.depth as usize);
+
+        for pair in self.bids.iter().rev() {
+            let price_float = int_to_float(*pair.0, self.pair_decimals);
+            let qty_float = int_to_float(*pair.1, self.lot_decimals);
+
+            bids_to_print.push((price_float, qty_float));
+        }
+
+        for pair in self.asks.iter() {
+            let price_float = int_to_float(*pair.0, self.pair_decimals);
+            let qty_float = int_to_float(*pair.1, self.lot_decimals);
+
+            asks_to_print.push((price_float, qty_float));
+        }
+
+        println!("{}", "=".repeat(100));
+        println!("OrderBook {} {:?}", self.name, Utc::now());
+        for (bid_pair, ask_pair) in bids_to_print.iter().zip(asks_to_print) {
+            println!(
+                "q_bid={:<5.2}, p_bid={:.2} | p_ask={:.2}, q_ask={:>5.2}",
+                bid_pair.1, bid_pair.0, ask_pair.0, ask_pair.1
+            );
+        }
+        println!("{}", "=".repeat(100));
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -242,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_order_book_trims_to_depth() {
-        let mut book = OrderBook::new(book_name(), 10);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8);
 
         let update = get_update(10, 100, 42);
         book.apply_update(update).unwrap();
@@ -258,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_order_book_overwrites_quantities() {
-        let mut book = OrderBook::new(book_name(), 10);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8);
 
         let update = get_update(2, 100, 42);
         book.apply_update(update).unwrap();
@@ -278,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_order_book_all_price_levels_present() {
-        let mut book = OrderBook::new(book_name(), 10);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8);
 
         let update = get_update(1, 100, 42);
         book.apply_update(update).unwrap();

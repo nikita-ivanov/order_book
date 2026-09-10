@@ -61,8 +61,13 @@ impl KrakenFeed {
         let precisions = get_precision(symbols).await?;
         let mut books = HashMap::<String, OrderBook>::new();
 
-        for (symbol, _) in precisions.iter() {
-            let ob = OrderBook::new(String::from(symbol), depth);
+        for (symbol, precision) in precisions.iter() {
+            let ob = OrderBook::new(
+                String::from(symbol),
+                depth,
+                precision.pair_decimals,
+                precision.lot_decimals,
+            );
 
             books.insert(String::from(symbol), ob);
         }
@@ -312,6 +317,8 @@ mod tests {
         let ob = OrderBook {
             name: "dummy order book".to_string(),
             depth,
+            pair_decimals: 1,
+            lot_decimals: 2,
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
         };
