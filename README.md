@@ -1,8 +1,6 @@
 Order book websocket streaming
 ---
 
-## Description
-
 Toy project that implements live order book processing service, written in Rust.
 
 ## Running
