@@ -173,8 +173,6 @@ impl BidAskPair {
 
 #[cfg(test)]
 mod tests {
-    use serde::de::Expected;
-
     use super::*;
 
     fn get_update(n: usize, start_price: i64, start_qty: i64) -> BookUpdate {
