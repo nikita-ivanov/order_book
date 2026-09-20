@@ -1,13 +1,20 @@
 Order book websocket streaming
 ---
 
-### Description
+## Description
 
-Toy project of live processing order book data, implemented in Rust.
+Toy project that implements live order book processing service, written in Rust.
 
-### TODOs
+## Running
+```
+# run
+cargo r ETH/USD
 
-- get price and qty decimal point precision from API rather than hardcoding
-- add print book functionality (decimal format)
-- for top of book display decimal format instead of integers
-- add swappable storage options
+# test
+cargo t
+```
+
+## Design
+`OrderBook` is an independent object that can `apply_update`s.
+`KrakenFeed` is a particular implementation of an order book feed that uses `OrderBook`.
+
