@@ -26,7 +26,7 @@ cargo r ETH/USD SOL/USD
 
 Define order book depth (allowed values 10, 25, 100)
 ```
-cargo r SOL/USD --depth 15
+cargo r SOL/USD --depth 25
 ```
 
 Specify retry policy
