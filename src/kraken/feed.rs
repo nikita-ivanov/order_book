@@ -363,6 +363,7 @@ mod tests {
             precisions,
             verify_checksum: true,
             symbols: Vec::from(["BTC/USD".to_string()]),
+            stores: None,
         }
     }
 
