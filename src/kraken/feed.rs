@@ -66,7 +66,6 @@ impl KrakenFeed {
 
         for (symbol, precision) in precisions.iter() {
             // TODO I don't like that we have ~5 string allocations here
-            let symbol = &String::from(symbol).replace("/", "_");
 
             let ob = OrderBook::new(
                 String::from(symbol),
@@ -77,10 +76,12 @@ impl KrakenFeed {
 
             books.insert(String::from(symbol), ob);
 
+            let symbol_slugified = &String::from(symbol).replace("/", "_");
+
             stores.insert(
                 String::from(symbol),
                 OrderBookStore::FileOrderBookStore(FileStore::new(
-                    Path::new(&format!("/Users/nivanov/test/{symbol}.txt")),
+                    Path::new(&format!("/Users/nivanov/test/{symbol_slugified}.csv")),
                     depth as usize,
                 )),
             );
@@ -124,12 +125,12 @@ impl KrakenFeed {
         let symbol = &message.data[0].symbol;
         let order_book = match self.order_books.get_mut(symbol) {
             Some(book) => book,
-            None => panic!("could not find order book"),
+            None => panic!("could not find order book {symbol}"),
         };
 
         let mut store: Option<&OrderBookStore> = None;
         if let Some(stores) = &self.stores {
-            store = Some(stores.get(symbol).expect("Store should be there"));
+            store = Some(stores.get(symbol).expect("Store {symbol} should be there"));
         }
 
         let precisions = self.precisions.get(symbol).unwrap();
