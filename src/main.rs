@@ -27,6 +27,12 @@ struct Args {
     retry_policy: RetryPolicyKind,
 }
 
+// #[tokio::main]
+// async fn main() {
+//     let path = Path::new("/Users/nivanov/test/delemte3.txt");
+//     let store = FileStore::new(path, 10);
+// }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();

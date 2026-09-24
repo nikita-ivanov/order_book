@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::Number;
-use std::{collections::HashMap, num::ParseIntError};
+use std::{collections::HashMap, num::ParseIntError, path::Path};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -10,6 +10,7 @@ use crate::{
         models::{BasicInfo, BasicInfoResult, BookMessage},
         precision::{AssetPairPrecision, get_precision},
     },
+    store::{FileStore, OrderBookStore},
 };
 
 #[derive(Debug, Error, PartialEq)]
@@ -53,15 +54,20 @@ pub struct KrakenFeed {
     pub order_books: HashMap<String, OrderBook>,
     precisions: HashMap<String, AssetPairPrecision>,
     verify_checksum: bool,
+    stores: Option<HashMap<String, OrderBookStore>>,
 }
 
 impl KrakenFeed {
-    // TODO should parse precisions?
+    // It would probably make more sense to restrict one feed to one symbol?
     pub async fn new(symbols: &[String], depth: u16, verify_checksum: bool) -> Result<KrakenFeed> {
         let precisions = get_precision(symbols).await?;
         let mut books = HashMap::<String, OrderBook>::new();
+        let mut stores = HashMap::<String, OrderBookStore>::new();
 
         for (symbol, precision) in precisions.iter() {
+            // TODO I don't like that we have ~5 string allocations here
+            let symbol = &String::from(symbol).replace("/", "_");
+
             let ob = OrderBook::new(
                 String::from(symbol),
                 depth,
@@ -70,6 +76,14 @@ impl KrakenFeed {
             );
 
             books.insert(String::from(symbol), ob);
+
+            stores.insert(
+                String::from(symbol),
+                OrderBookStore::FileOrderBookStore(FileStore::new(
+                    Path::new(&format!("/Users/nivanov/test/{symbol}.txt")),
+                    depth as usize,
+                )),
+            );
         }
 
         Ok(KrakenFeed {
@@ -78,6 +92,7 @@ impl KrakenFeed {
             precisions,
             order_books: books,
             verify_checksum,
+            stores: Some(stores),
         })
     }
 
@@ -112,6 +127,11 @@ impl KrakenFeed {
             None => panic!("could not find order book"),
         };
 
+        let mut store: Option<&OrderBookStore> = None;
+        if let Some(stores) = &self.stores {
+            store = Some(stores.get(symbol).expect("Store should be there"));
+        }
+
         let precisions = self.precisions.get(symbol).unwrap();
 
         let mut bids = Vec::<Level>::new();
@@ -137,6 +157,10 @@ impl KrakenFeed {
             Ok(()) => Ok(()),
             Err(e) => Err(KrakenFeedError::OrderBookError { source: e }),
         };
+
+        if let Some(store) = store {
+            store.save(order_book);
+        }
 
         if self.verify_checksum {
             let bids: &Vec<(i64, i64)> = &order_book
