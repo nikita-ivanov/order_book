@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufWriter, Write},
     path::Path,
@@ -87,8 +88,7 @@ impl FileStore {
         // pad to make sure we guarantee number of cols
         if i < ob.depth {
             for _ in i..ob.depth {
-                s += "0,";
-                s += "0,";
+                s += "0,0,"; // p and q
             }
         }
 
@@ -105,17 +105,38 @@ impl FileStore {
 
         if i < ob.depth {
             for _ in i..ob.depth {
-                s += "0,";
-                s += "0,";
+                s += "0,0,";
             }
         }
 
-        s.pop();
+        s.pop(); // trailing comma
         s += "\n";
 
         let bytes = s.as_bytes();
         writer.write_all(bytes).unwrap();
     }
+}
+
+pub fn construct_file_stores(
+    symbols: &Vec<String>,
+    depth: usize,
+) -> HashMap<String, OrderBookStore> {
+    let mut stores = HashMap::<String, OrderBookStore>::new();
+    for symbol in symbols {
+        let symbol_slugified = &String::from(symbol).replace("/", "_").to_lowercase();
+        //
+        // TODO will fail if ob_data folder does not exist
+        let path = dirs::home_dir()
+            .expect("Could not infer home directory")
+            .join(format!("ob_data/{symbol_slugified}.csv"));
+
+        stores.insert(
+            String::from(symbol),
+            OrderBookStore::FileOrderBookStore(FileStore::new(path.as_path(), depth)),
+        );
+    }
+
+    stores
 }
 
 #[cfg(test)]

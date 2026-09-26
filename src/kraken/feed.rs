@@ -1,8 +1,13 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use futures_util::{
+    SinkExt, StreamExt,
+    stream::{SplitSink, SplitStream},
+};
 use serde_json::Number;
-use std::{collections::HashMap, num::ParseIntError, path::Path};
+use std::{collections::HashMap, num::ParseIntError};
 use thiserror::Error;
-use tokio_tungstenite::tungstenite::Message;
+use tokio::net::TcpStream;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 use crate::{
     book::order_book::{BookUpdate, Level, OrderBook, OrderBookError},
@@ -10,8 +15,12 @@ use crate::{
         models::{BasicInfo, BasicInfoResult, BookMessage},
         precision::{AssetPairPrecision, get_precision},
     },
-    store::{FileStore, OrderBookStore},
+    store::OrderBookStore,
 };
+
+type WebsocketStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type Transmitter = SplitSink<WebsocketStream, Message>;
+type Receiver = SplitStream<WebsocketStream>;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum KrakenFeedError {
@@ -48,6 +57,28 @@ pub enum KrakenFeedError {
     UnknownMessage { message: Message },
 }
 
+async fn request_channels(tx: &mut Transmitter, symbols: &Vec<String>, depth: usize) -> Result<()> {
+    let data = serde_json::json!({
+        "method": "subscribe",
+        "params": {
+            "channel": "book",
+            "depth": depth,
+            "symbol": symbols,
+        }
+    });
+
+    tx.send(Message::text(data.to_string())).await?;
+
+    Ok(())
+}
+
+async fn connect() -> Result<WebsocketStream> {
+    let url = "wss://ws.kraken.com/v2";
+    let (ws, _) = connect_async(url).await?;
+
+    Ok(ws)
+}
+
 pub struct KrakenFeed {
     pub symbols: Vec<String>,
     pub depth: u16,
@@ -58,11 +89,15 @@ pub struct KrakenFeed {
 }
 
 impl KrakenFeed {
-    // It would probably make more sense to restrict one feed to one symbol?
-    pub async fn new(symbols: &[String], depth: u16, verify_checksum: bool) -> Result<KrakenFeed> {
+    // TODO It would probably make more sense to restrict one feed to one symbol?
+    pub async fn new(
+        symbols: &[String],
+        depth: u16,
+        verify_checksum: bool,
+        stores: HashMap<String, OrderBookStore>,
+    ) -> Result<KrakenFeed> {
         let precisions = get_precision(symbols).await?;
         let mut books = HashMap::<String, OrderBook>::new();
-        let mut stores = HashMap::<String, OrderBookStore>::new();
 
         for (symbol, precision) in precisions.iter() {
             // TODO I don't like that we have ~5 string allocations here
@@ -75,16 +110,6 @@ impl KrakenFeed {
             );
 
             books.insert(String::from(symbol), ob);
-
-            let symbol_slugified = &String::from(symbol).replace("/", "_");
-
-            stores.insert(
-                String::from(symbol),
-                OrderBookStore::FileOrderBookStore(FileStore::new(
-                    Path::new(&format!("/Users/nivanov/test/{symbol_slugified}.csv")),
-                    depth as usize,
-                )),
-            );
         }
 
         Ok(KrakenFeed {
@@ -189,6 +214,82 @@ impl KrakenFeed {
         };
 
         Ok(order_book)
+    }
+
+    async fn receiving_loop(&mut self, rx: &mut Receiver) -> Result<()> {
+        // TODO handle update/snapshot messages differently?
+        while let Some(msg) = rx.next().await {
+            let msg = match msg {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("Websocket error, will skip. Error was: {e:?}");
+                    continue;
+                }
+            };
+
+            match self.process(msg) {
+                Ok(ob) => {
+                    ob.print();
+
+                    continue;
+                }
+
+                Err(KrakenFeedError::UnknownMessage { message }) => {
+                    println!("Unknown message, will skip.\n{message:?}");
+                    continue;
+                }
+
+                Err(KrakenFeedError::BookEmpty) => {
+                    // this is unreachable
+                    continue;
+                }
+
+                Err(KrakenFeedError::InvalidNumber { number, source }) => {
+                    println!(
+                        "Received invalid number during parsing: {number:?}. Parsing error was {source:?}. Will skip."
+                    );
+                    continue;
+                }
+
+                Err(KrakenFeedError::DeserializationError { message }) => {
+                    println!("Failed to deserialize message. Will skip. Message was {message:?}");
+                    continue;
+                }
+
+                Err(KrakenFeedError::ChecksumMismatch { computed, received }) => {
+                    anyhow!(
+                        "Checksum mismatch: received {received:?} vs. computed {computed:?}. Try to reconnect."
+                    )
+                }
+
+                Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
+                    anyhow!(
+                        "Exchange sent a number with higher precision than expected, which is considered a breaking error.
+                        Precision was {precision} while received number was {number}"
+                    )
+                }
+
+                Err(KrakenFeedError::OrderBookError { source }) => {
+                    anyhow!(
+                        "Error during order book processing, try to reconnect. Error was\n{source:?}"
+                    )
+                }
+            };
+        }
+
+        Err(anyhow!("websocket exited, try to reconnect"))
+    }
+
+    pub async fn run_once(&mut self) -> Result<()> {
+        let ws = connect().await?;
+        let (mut tx, mut rx) = ws.split();
+
+        request_channels(&mut tx, &self.symbols, self.depth as usize).await?;
+
+        match self.receiving_loop(&mut rx).await {
+            Ok(()) => Ok(()),
+            Err(other) => Err(anyhow!("received unexpected error during loop: {other:?}")),
+        }
     }
 
     fn compute_checksum(bids: &[(i64, i64)], asks: &[(i64, i64)]) -> u32 {
