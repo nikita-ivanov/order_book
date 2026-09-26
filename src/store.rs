@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
     path::Path,
 };
@@ -10,26 +10,26 @@ use chrono::Utc;
 use crate::book::order_book::{OrderBook, int_to_float};
 
 pub enum OrderBookStore {
-    FileOrderBookStore(FileStore),
+    CsvOrderBookStore(CsvStore),
 }
 
 impl OrderBookStore {
     pub fn save(&self, ob: &OrderBook) {
         match self {
-            OrderBookStore::FileOrderBookStore(store) => {
+            OrderBookStore::CsvOrderBookStore(store) => {
                 store.save(ob);
             }
         }
     }
 }
 
-pub struct FileStore {
+pub struct CsvStore {
     file: File,
 }
 
 // TODO should we add convert int to right scaled float?
-impl FileStore {
-    pub fn new(path: &Path, depth: usize) -> FileStore {
+impl CsvStore {
+    pub fn new(path: &Path, depth: usize) -> CsvStore {
         let file_exists = path.exists();
 
         let mut file = OpenOptions::new()
@@ -59,7 +59,7 @@ impl FileStore {
             file.write_all(s.as_bytes()).unwrap();
         }
 
-        FileStore { file }
+        CsvStore { file }
     }
 
     /// Saves order book in wide format. Number of columns will be equal to order book depth * 4.
@@ -124,15 +124,17 @@ pub fn construct_file_stores(
     let mut stores = HashMap::<String, OrderBookStore>::new();
     for symbol in symbols {
         let symbol_slugified = &String::from(symbol).replace("/", "_").to_lowercase();
-        //
-        // TODO will fail if ob_data folder does not exist
+
         let path = dirs::home_dir()
             .expect("Could not infer home directory")
             .join(format!("ob_data/{symbol_slugified}.csv"));
 
+        let prefix = path.parent().expect("Parent is home dir / ob_data");
+        fs::create_dir_all(prefix).unwrap_or_else(|_| panic!("Failed to create {prefix:?}"));
+
         stores.insert(
             String::from(symbol),
-            OrderBookStore::FileOrderBookStore(FileStore::new(path.as_path(), depth)),
+            OrderBookStore::CsvOrderBookStore(CsvStore::new(path.as_path(), depth)),
         );
     }
 
@@ -145,7 +147,7 @@ mod tests {
 
     use crate::{
         book::order_book::{BookUpdate, Level, OrderBook},
-        store::FileStore,
+        store::CsvStore,
     };
 
     #[test]
@@ -153,7 +155,7 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let depth = 10;
-        let store = FileStore::new(file.path(), depth);
+        let store = CsvStore::new(file.path(), depth);
         let contents = fs::read_to_string(file.path()).unwrap();
 
         // this checks that header has expected number of elements
