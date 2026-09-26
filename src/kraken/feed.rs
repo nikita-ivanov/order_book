@@ -1,14 +1,11 @@
 use anyhow::{Result, anyhow};
-use futures_util::{
-    SinkExt, StreamExt,
-    stream::{SplitSink, SplitStream},
-};
+use futures_util::StreamExt;
 use serde_json::Number;
 use std::{collections::HashMap, num::ParseIntError};
 use thiserror::Error;
-use tokio::net::TcpStream;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
+use crate::kraken::core::{Receiver, connect, request_channels};
 use crate::{
     book::order_book::{BookUpdate, Level, OrderBook, OrderBookError},
     kraken::{
@@ -17,10 +14,6 @@ use crate::{
     },
     store::OrderBookStore,
 };
-
-type WebsocketStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
-type Transmitter = SplitSink<WebsocketStream, Message>;
-type Receiver = SplitStream<WebsocketStream>;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum KrakenFeedError {
@@ -55,28 +48,6 @@ pub enum KrakenFeedError {
 
     #[error("Unknown message: {message}")]
     UnknownMessage { message: Message },
-}
-
-async fn request_channels(tx: &mut Transmitter, symbols: &Vec<String>, depth: usize) -> Result<()> {
-    let data = serde_json::json!({
-        "method": "subscribe",
-        "params": {
-            "channel": "book",
-            "depth": depth,
-            "symbol": symbols,
-        }
-    });
-
-    tx.send(Message::text(data.to_string())).await?;
-
-    Ok(())
-}
-
-async fn connect() -> Result<WebsocketStream> {
-    let url = "wss://ws.kraken.com/v2";
-    let (ws, _) = connect_async(url).await?;
-
-    Ok(ws)
 }
 
 pub struct KrakenFeed {

@@ -32,8 +32,10 @@ async fn main() -> Result<()> {
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
+    // TODO this should come from CLI args
     let stores = construct_file_stores(&args.symbols, args.depth);
-    let mut feed = KrakenFeed::new(&args.symbols[..], args.depth as u16, true, stores).await?;
+
+    let mut feed = KrakenFeed::new(&args.symbols, args.depth as u16, true, stores).await?;
 
     loop {
         match feed.run_once().await {
