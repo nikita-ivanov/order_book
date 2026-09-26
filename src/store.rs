@@ -6,7 +6,7 @@ use std::{
 
 use chrono::Utc;
 
-use crate::book::order_book::OrderBook;
+use crate::book::order_book::{OrderBook, int_to_float};
 
 pub enum OrderBookStore {
     FileOrderBookStore(FileStore),
@@ -26,7 +26,6 @@ pub struct FileStore {
     file: File,
 }
 
-// TODO add timestamp to the file as a column
 // TODO should we add convert int to right scaled float?
 impl FileStore {
     pub fn new(path: &Path, depth: usize) -> FileStore {
@@ -41,7 +40,7 @@ impl FileStore {
         if !file_exists {
             // initialize headers
             let mut s = String::new();
-            s += "timestamp,";
+            s += "timestamp_ms,";
 
             for i in 1..depth + 1 {
                 s += &format!("bid_p_{i},");
@@ -77,8 +76,11 @@ impl FileStore {
         // write (p,q) starting from best bid
         let mut i = 0;
         for (p, q) in ob.bids.iter().rev() {
-            s = s + &p.to_string() + ",";
-            s = s + &q.to_string() + ",";
+            let price = int_to_float(*p, ob.pair_decimals);
+            let quantity = int_to_float(*q, ob.lot_decimals);
+
+            s = s + &price.to_string() + ",";
+            s = s + &quantity.to_string() + ",";
             i += 1;
         }
 
@@ -93,8 +95,11 @@ impl FileStore {
         // same for asks (starting best ask)
         let mut i = 0;
         for (p, q) in ob.asks.iter() {
-            s = s + &p.to_string() + ",";
-            s = s + &q.to_string() + ",";
+            let price = int_to_float(*p, ob.pair_decimals);
+            let quantity = int_to_float(*q, ob.lot_decimals);
+
+            s = s + &price.to_string() + ",";
+            s = s + &quantity.to_string() + ",";
             i += 1;
         }
 
