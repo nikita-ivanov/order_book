@@ -31,6 +31,7 @@ pub struct CsvStore {
 impl CsvStore {
     pub fn new(path: &Path, depth: usize) -> CsvStore {
         let file_exists = path.exists();
+        dbg!(format!("File {path:?} exists: {file_exists}"));
 
         let mut file = OpenOptions::new()
             .append(true)
@@ -154,13 +155,18 @@ mod tests {
     fn test_file_store_works() {
         let file = tempfile::NamedTempFile::new().unwrap();
 
+        // delete file since we want to simulate writing from zero;
+        // otherwise we would not write header; note this keeps the parent directory
+        fs::remove_file(file.path()).unwrap();
+
         let depth = 10;
         let store = CsvStore::new(file.path(), depth);
         let contents = fs::read_to_string(file.path()).unwrap();
 
-        // this checks that header has expected number of elements
+        // this checks that header has expected number of elements;
+        // we expect depth (10) * 4 + 1 (for timestamp_ms column)
         let (first_row, _) = contents.split_once("\n").unwrap();
-        assert_eq!(first_row.split(",").collect::<Vec<&str>>().len(), 40);
+        assert_eq!(first_row.split(",").collect::<Vec<&str>>().len(), 41);
 
         let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0);
 
@@ -202,7 +208,10 @@ mod tests {
         store.save(&ob);
 
         let contents = fs::read_to_string(file.path()).unwrap();
+        // drop header
         let (_, contents) = contents.split_once("\n").unwrap();
+        // drop timestamp_ms
+        let (_, contents) = contents.split_once(",").unwrap();
         assert_eq!(
             contents,
             "15,3,13,1,12,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,14,1,15,7,20,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n"
@@ -239,6 +248,14 @@ mod tests {
 
         let contents = fs::read_to_string(file.path()).unwrap();
         let (_, contents) = contents.split_once("\n").unwrap();
+
+        // remove timestamp_ms from both rows and then concatenate
+        let (first_row, second_row) = contents.split_once("\n").unwrap();
+        let (_, first_row) = first_row.split_once(",").unwrap();
+        let (_, second_row) = second_row.split_once(",").unwrap();
+
+        let contents = first_row.to_string() + "\n" + second_row;
+
         assert_eq!(
             contents,
             ("15,3,13,1,12,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,14,1,15,7,20,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n".to_string()
