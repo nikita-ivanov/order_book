@@ -124,11 +124,6 @@ impl KrakenFeed {
             None => panic!("could not find order book {symbol}"),
         };
 
-        let mut store: Option<&OrderBookStore> = None;
-        if let Some(stores) = &self.stores {
-            store = Some(stores.get(symbol).expect("Store {symbol} should be there"));
-        }
-
         let precisions = self.precisions.get(symbol).unwrap();
 
         let mut bids = Vec::<Level>::new();
@@ -155,7 +150,11 @@ impl KrakenFeed {
             Err(e) => Err(KrakenFeedError::OrderBookError { source: e }),
         };
 
-        if let Some(store) = store {
+        if let Some(stores) = &mut self.stores {
+            let store = stores
+                .get_mut(symbol)
+                .expect("Store {symbol} should be there");
+
             store.save(order_book);
         }
 

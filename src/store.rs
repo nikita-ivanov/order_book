@@ -1,21 +1,26 @@
 mod csv;
+mod parquet;
 
 use std::{
     collections::HashMap,
     fs::{self},
 };
 
-use crate::book::order_book::OrderBook;
+use crate::{book::order_book::OrderBook, store::parquet::ParquetStore};
 use csv::CsvStore;
 
 pub enum OrderBookStore {
     CsvOrderBookStore(CsvStore),
+    ParquetOrderBookStore(ParquetStore),
 }
 
 impl OrderBookStore {
-    pub fn save(&self, ob: &OrderBook) {
+    pub fn save(&mut self, ob: &OrderBook) {
         match self {
             OrderBookStore::CsvOrderBookStore(store) => {
+                store.save(ob);
+            }
+            OrderBookStore::ParquetOrderBookStore(store) => {
                 store.save(ob);
             }
         }
@@ -32,14 +37,16 @@ pub fn construct_file_stores(
 
         let path = dirs::home_dir()
             .expect("Could not infer home directory")
-            .join(format!("ob_data/{symbol_slugified}.csv"));
+            // .join(format!("ob_data/{symbol_slugified}.csv"));
+            .join(format!("ob_data/{symbol_slugified}.parquet"));
 
         let prefix = path.parent().expect("Parent is home dir / ob_data");
         fs::create_dir_all(prefix).unwrap_or_else(|_| panic!("Failed to create {prefix:?}"));
 
         stores.insert(
             String::from(symbol),
-            OrderBookStore::CsvOrderBookStore(CsvStore::new(path.as_path(), depth)),
+            // OrderBookStore::CsvOrderBookStore(CsvStore::new(path.as_path(), depth)),
+            OrderBookStore::ParquetOrderBookStore(ParquetStore::new(path.as_path(), depth)),
         );
     }
 
