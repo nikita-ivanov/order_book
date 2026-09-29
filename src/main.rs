@@ -52,8 +52,8 @@ async fn main() -> Result<()> {
 
     loop {
         tokio::select! {
-            result2 = feed.run_once() => {
-                match result2 {
+            result = feed.run_once() => {
+                match result {
                     Ok(_) => continue,
 
                     Err(e) => match retry_policy.on_failure() {
@@ -72,7 +72,10 @@ async fn main() -> Result<()> {
                 }
             }
             // on ctrl c shutdowns, break the loop such thtat all Drop traits can run to cleanup
-            _ = tokio::signal::ctrl_c() => break
+            _ = tokio::signal::ctrl_c() => {
+                    println!("received ctrl c, gracefull shutdown");
+                    break;
+                }
         }
     }
 

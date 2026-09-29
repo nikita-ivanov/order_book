@@ -46,7 +46,7 @@ pub fn construct_file_stores(
         stores.insert(
             String::from(symbol),
             // OrderBookStore::CsvOrderBookStore(CsvStore::new(path.as_path(), depth)),
-            OrderBookStore::ParquetOrderBookStore(ParquetStore::new(path.as_path(), depth)),
+            OrderBookStore::ParquetOrderBookStore(ParquetStore::new(symbol.to_string(), depth)),
         );
     }
 
