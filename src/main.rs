@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
                     println!("received ctrl c, gracefull shutdown");
                     break;
                 }
-        }
+        };
     }
 
     Ok(())

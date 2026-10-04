@@ -150,14 +150,6 @@ impl KrakenFeed {
             Err(e) => Err(KrakenFeedError::OrderBookError { source: e }),
         };
 
-        if let Some(stores) = &mut self.stores {
-            let store = stores
-                .get_mut(symbol)
-                .expect("Store {symbol} should be there");
-
-            store.save(order_book);
-        }
-
         if self.verify_checksum {
             let bids: &Vec<(i64, i64)> = &order_book
                 .bids
@@ -182,6 +174,14 @@ impl KrakenFeed {
                 });
             }
         };
+
+        if let Some(stores) = &mut self.stores {
+            let store = stores
+                .get_mut(symbol)
+                .expect("Store {symbol} should be there");
+
+            store.save(order_book);
+        }
 
         Ok(order_book)
     }
