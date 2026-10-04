@@ -1,10 +1,7 @@
 mod csv;
 mod parquet;
 
-use std::{
-    collections::HashMap,
-    fs::{self},
-};
+use std::collections::HashMap;
 
 use crate::{book::order_book::OrderBook, store::parquet::ParquetStore};
 use csv::CsvStore;
@@ -33,15 +30,15 @@ pub fn construct_file_stores(
 ) -> HashMap<String, OrderBookStore> {
     let mut stores = HashMap::<String, OrderBookStore>::new();
     for symbol in symbols {
-        let symbol_slugified = &String::from(symbol).replace("/", "_").to_lowercase();
+        // let symbol_slugified = &String::from(symbol).replace("/", "_").to_lowercase();
 
-        let path = dirs::home_dir()
-            .expect("Could not infer home directory")
-            // .join(format!("ob_data/{symbol_slugified}.csv"));
-            .join(format!("ob_data/{symbol_slugified}.parquet"));
+        // let path = dirs::home_dir()
+        //     .expect("Could not infer home directory")
+        //     // .join(format!("ob_data/{symbol_slugified}.csv"));
+        //     .join(format!("ob_data/{symbol_slugified}.parquet"));
 
-        let prefix = path.parent().expect("Parent is home dir / ob_data");
-        fs::create_dir_all(prefix).unwrap_or_else(|_| panic!("Failed to create {prefix:?}"));
+        // let prefix = path.parent().expect("Parent is home dir / ob_data");
+        // fs::create_dir_all(prefix).unwrap_or_else(|_| panic!("Failed to create {prefix:?}"));
 
         stores.insert(
             String::from(symbol),

@@ -229,6 +229,17 @@ mod tests {
 
         assert_eq!(
             value
+                .column_by_name("bid_q_1")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .unwrap()
+                .value(0),
+            3.0
+        );
+
+        assert_eq!(
+            value
                 .column_by_name("ask_p_1")
                 .unwrap()
                 .as_any()
@@ -236,6 +247,17 @@ mod tests {
                 .unwrap()
                 .value(0),
             14.0
+        );
+
+        assert_eq!(
+            value
+                .column_by_name("ask_q_1")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .unwrap()
+                .value(0),
+            1.0
         );
     }
 }
