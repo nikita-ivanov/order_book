@@ -12,6 +12,7 @@ use std::sync::Arc;
 use crate::book::order_book::OrderBook;
 use crate::book::order_book::int_to_float;
 
+#[derive(Debug)]
 pub struct ParquetStore {
     writer: Option<ArrowWriter<File>>,
     schema: Arc<Schema>,
@@ -26,7 +27,7 @@ impl ParquetStore {
                 let file_name = uuid::Uuid::new_v4().to_string();
                 dirs::home_dir()
                     .expect("Could not infer home directory")
-                    .join(format!("{symbol_slug}/{file_name}.parquet"))
+                    .join(format!("ob_data/{symbol_slug}/{file_name}.parquet"))
             }
         };
 

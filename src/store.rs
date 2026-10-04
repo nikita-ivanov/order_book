@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::{book::order_book::OrderBook, store::parquet::ParquetStore};
 use csv::CsvStore;
 
+#[derive(Debug)]
 pub enum OrderBookStore {
     CsvOrderBookStore(CsvStore),
     ParquetOrderBookStore(ParquetStore),

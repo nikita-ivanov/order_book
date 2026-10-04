@@ -227,22 +227,22 @@ impl KrakenFeed {
                 }
 
                 Err(KrakenFeedError::ChecksumMismatch { computed, received }) => {
-                    anyhow!(
+                    return Err(anyhow!(
                         "Checksum mismatch: received {received:?} vs. computed {computed:?}. Try to reconnect."
-                    )
+                    ));
                 }
 
                 Err(KrakenFeedError::PrecisionExceeded { precision, number }) => {
-                    anyhow!(
+                    return Err(anyhow!(
                         "Exchange sent a number with higher precision than expected, which is considered a breaking error.
                         Precision was {precision} while received number was {number}"
-                    )
+                    ));
                 }
 
                 Err(KrakenFeedError::OrderBookError { source }) => {
-                    anyhow!(
+                    return Err(anyhow!(
                         "Error during order book processing, try to reconnect. Error was\n{source:?}"
-                    )
+                    ));
                 }
             };
         }

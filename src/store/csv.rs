@@ -8,6 +8,7 @@ use chrono::Utc;
 
 use crate::book::order_book::{OrderBook, int_to_float};
 
+#[derive(Debug)]
 pub struct CsvStore {
     file: File,
 }
