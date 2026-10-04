@@ -6,8 +6,10 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 futures-util = "0.3.33"
-tokio = {version="1", features=["full"]}
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+tokio = { version = "1", features = ["full"] }
+rustls = { version = "0.23", default-features = false, features = [
+  "aws_lc_rs",
+] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_derive = "1.0.229"
@@ -23,3 +25,4 @@ dirs = "7.0.0"
 parquet = "60.0.0"
 arrow-schema = "60.0.0"
 arrow-array = "60.0.0"
+uuid = { version = "1.26.1", features = ["v4"] }
