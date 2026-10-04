@@ -93,7 +93,7 @@ impl KrakenFeed {
         })
     }
 
-    pub fn process(&mut self, message: Message) -> Result<&OrderBook, KrakenFeedError> {
+    fn process(&mut self, message: Message) -> Result<&OrderBook, KrakenFeedError> {
         let Message::Text(bytes) = &message else {
             println!("Message was not of the text type, will skip. {message:?}");
             return Err(KrakenFeedError::UnknownMessage { message });
