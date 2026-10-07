@@ -4,17 +4,21 @@ use std::{
     path::Path,
 };
 
+use anyhow::Result;
 use chrono::Utc;
 
-use crate::book::order_book::{OrderBook, int_to_float};
+use crate::{
+    book::order_book::{OrderBook, int_to_float},
+    store::OrderBookSink,
+};
 
 #[derive(Debug)]
-pub struct CsvStore {
+pub struct CsvSink {
     file: File,
 }
 
-impl CsvStore {
-    pub fn new(path: &Path, depth: usize) -> CsvStore {
+impl CsvSink {
+    pub fn new(path: &Path, depth: usize) -> CsvSink {
         let file_exists = path.exists();
 
         let mut file = OpenOptions::new()
@@ -44,12 +48,14 @@ impl CsvStore {
             file.write_all(s.as_bytes()).unwrap();
         }
 
-        CsvStore { file }
+        CsvSink { file }
     }
+}
 
+impl OrderBookSink for CsvSink {
     /// Saves order book in wide format. Number of columns will be equal to order book depth * 4.
     /// First price, quatitity pairs from bids are written, then from asks.
-    pub fn save(&self, ob: &OrderBook) {
+    fn write(&mut self, ob: &OrderBook) -> Result<()> {
         let mut writer = BufWriter::new(&self.file);
 
         let mut s = String::new();
@@ -98,7 +104,9 @@ impl CsvStore {
         s += "\n";
 
         let bytes = s.as_bytes();
-        writer.write_all(bytes).unwrap();
+        writer.write_all(bytes)?;
+
+        Ok(())
     }
 }
 
@@ -108,7 +116,7 @@ mod tests {
 
     use crate::{
         book::order_book::{BookUpdate, Level, OrderBook},
-        store::CsvStore,
+        store::{OrderBookSink, csv::CsvSink},
     };
 
     #[test]
@@ -120,7 +128,7 @@ mod tests {
         fs::remove_file(file.path()).unwrap();
 
         let depth = 10;
-        let store = CsvStore::new(file.path(), depth);
+        let mut store = CsvSink::new(file.path(), depth);
         let contents = fs::read_to_string(file.path()).unwrap();
 
         // this checks that header has expected number of elements;
@@ -165,7 +173,8 @@ mod tests {
 
         dbg!(&ob);
 
-        store.save(&ob);
+        // TODO should propagate error
+        store.write(&ob).unwrap();
 
         let contents = fs::read_to_string(file.path()).unwrap();
         // drop header
@@ -204,7 +213,7 @@ mod tests {
 
         dbg!(&ob);
 
-        store.save(&ob);
+        store.write(&ob).unwrap();
 
         let contents = fs::read_to_string(file.path()).unwrap();
         let (_, contents) = contents.split_once("\n").unwrap();

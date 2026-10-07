@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::book::order_book::OrderBook;
 use crate::book::order_book::int_to_float;
+use crate::store::OrderBookSink;
 
 #[derive(Debug)]
 pub struct ParquetStore {
@@ -72,7 +73,25 @@ impl ParquetStore {
         }
     }
 
-    pub fn save(&mut self, ob: &OrderBook) -> Result<()> {
+    pub fn finish(&mut self) -> Result<()> {
+        match self.writer.take() {
+            Some(mut writer) => match writer.finish() {
+                Ok(_) => Ok(()),
+                Err(e) => Err(anyhow!("failed to finish the writer, error was: {e:?}")),
+            },
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for ParquetStore {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+impl OrderBookSink for ParquetStore {
+    fn write(&mut self, ob: &OrderBook) -> Result<()> {
         let now = Utc::now().timestamp_nanos_opt().unwrap();
         let timestamp = Int64Array::from(vec![now]);
 
@@ -135,22 +154,6 @@ impl ParquetStore {
             None => Err(anyhow!("writer already closed")),
         }
     }
-
-    pub fn finish(&mut self) -> Result<()> {
-        match self.writer.take() {
-            Some(mut writer) => match writer.finish() {
-                Ok(_) => Ok(()),
-                Err(e) => Err(anyhow!("failed to finish the writer, error was: {e:?}")),
-            },
-            None => Ok(()),
-        }
-    }
-}
-
-impl Drop for ParquetStore {
-    fn drop(&mut self) {
-        let _ = self.finish();
-    }
 }
 
 #[cfg(test)]
@@ -162,7 +165,7 @@ mod tests {
 
     use crate::{
         book::order_book::{BookUpdate, Level, OrderBook},
-        store::parquet::ParquetStore,
+        store::{OrderBookSink, parquet::ParquetStore},
     };
 
     #[test]
@@ -206,7 +209,7 @@ mod tests {
         })
         .unwrap();
 
-        store.save(&ob).unwrap();
+        store.write(&ob).unwrap();
 
         store.finish().unwrap();
 

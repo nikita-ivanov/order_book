@@ -12,7 +12,7 @@ use crate::{
         models::{BasicInfo, BasicInfoResult, BookMessage},
         precision::{AssetPairPrecision, get_precision},
     },
-    store::OrderBookStore,
+    store::OrderBookSink,
 };
 
 #[derive(Debug, Error, PartialEq)]
@@ -56,7 +56,7 @@ pub struct KrakenFeed {
     pub order_books: HashMap<String, OrderBook>,
     precisions: HashMap<String, AssetPairPrecision>,
     verify_checksum: bool,
-    stores: Option<HashMap<String, OrderBookStore>>,
+    stores: Option<HashMap<String, Box<dyn OrderBookSink>>>,
 }
 
 impl KrakenFeed {
@@ -65,7 +65,7 @@ impl KrakenFeed {
         symbols: &[String],
         depth: u16,
         verify_checksum: bool,
-        stores: HashMap<String, OrderBookStore>,
+        stores: HashMap<String, Box<dyn OrderBookSink>>,
     ) -> Result<KrakenFeed> {
         let precisions = get_precision(symbols).await?;
         let mut books = HashMap::<String, OrderBook>::new();
@@ -180,7 +180,8 @@ impl KrakenFeed {
                 .get_mut(symbol)
                 .expect("Store {symbol} should be there");
 
-            store.save(order_book);
+            // TODO this should be returned as error, currently cannot convert with ?
+            store.write(order_book).expect("failed to write data");
         }
 
         Ok(order_book)
