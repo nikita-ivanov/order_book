@@ -6,7 +6,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::book::order_book::OrderBook;
@@ -21,7 +21,12 @@ pub struct ParquetStore {
 impl ParquetStore {
     pub fn new(symbol: String, depth: usize, file_path: Option<PathBuf>) -> ParquetStore {
         let file_path = match file_path {
-            Some(path) => path,
+            Some(path) => {
+                if Path::exists(&path) {
+                    println!("Supplied path exists, contents will be overwritten: {path:?}");
+                }
+                path
+            }
             None => {
                 let symbol_slug = symbol.replace("/", "_").to_lowercase();
                 let file_name = uuid::Uuid::new_v4().to_string();
