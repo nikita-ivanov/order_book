@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use chrono::Utc;
 use futures_util::StreamExt;
 use serde_json::Number;
 use std::{collections::HashMap, num::ParseIntError};
@@ -78,6 +79,7 @@ impl KrakenFeed {
                 depth,
                 precision.pair_decimals,
                 precision.lot_decimals,
+                Utc::now(),
             );
 
             books.insert(String::from(symbol), ob);
@@ -118,7 +120,9 @@ impl KrakenFeed {
             }
         };
 
-        let symbol = &message.data[0].symbol;
+        let message_data = &message.data[0];
+
+        let symbol = &message_data.symbol;
         let order_book = match self.order_books.get_mut(symbol) {
             Some(book) => book,
             None => panic!("could not find order book {symbol}"),
@@ -127,14 +131,14 @@ impl KrakenFeed {
         let precisions = self.precisions.get(symbol).unwrap();
 
         let mut bids = Vec::<Level>::new();
-        for bid in &message.data[0].bids {
+        for bid in &message_data.bids {
             let price = KrakenFeed::number_to_i64(&bid.price, precisions.pair_decimals)?;
             let quantity = KrakenFeed::number_to_i64(&bid.qty, precisions.lot_decimals)?;
             bids.push(Level { price, quantity })
         }
 
         let mut asks = Vec::<Level>::new();
-        for ask in &message.data[0].asks {
+        for ask in &message_data.asks {
             let price = KrakenFeed::number_to_i64(&ask.price, precisions.pair_decimals)?;
             let quantity = KrakenFeed::number_to_i64(&ask.qty, precisions.lot_decimals)?;
             asks.push(Level { price, quantity })
@@ -143,6 +147,7 @@ impl KrakenFeed {
         let book_update = BookUpdate {
             bids: Some(bids),
             asks: Some(asks),
+            timestamp: message.data[0].timestamp,
         };
 
         let _ = match order_book.apply_update(book_update) {
@@ -327,6 +332,7 @@ impl KrakenFeed {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
     use std::collections::{BTreeMap, HashMap};
     use tokio_tungstenite::tungstenite::{Bytes, Message, Utf8Bytes};
 
@@ -418,6 +424,7 @@ mod tests {
             lot_decimals: 2,
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
+            timestamp: Utc::now(),
         };
         order_books.insert("BTC/USD".to_string(), ob);
 

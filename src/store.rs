@@ -4,7 +4,7 @@ mod parquet;
 
 use std::collections::HashMap;
 
-use crate::{book::order_book::OrderBook, store::parquet::ParquetStore};
+use crate::{book::order_book::OrderBook, store::parquet::ParquetSink};
 
 pub trait OrderBookSink {
     fn write(&mut self, ob: &OrderBook) -> Result<()>;
@@ -18,7 +18,7 @@ pub fn construct_file_stores(
     for symbol in symbols {
         stores.insert(
             String::from(symbol),
-            Box::new(ParquetStore::new(symbol.to_string(), depth, None)),
+            Box::new(ParquetSink::new(symbol.to_string(), depth, None)),
         );
     }
 

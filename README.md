@@ -35,7 +35,7 @@ cargo r ETH/USD --retry-policy no-retry
 ```
 
 ## TODOs
-1. switch to traits for order book stores
+1. switch to traits for order book stores - done
 2. record timestamp from order book message as well as write timestamp
 3. Feed should hold SymbolState{book, precision, store} instead of multiple hash maps
 4. stores in feed or symbol state should not be Option, rather no op store

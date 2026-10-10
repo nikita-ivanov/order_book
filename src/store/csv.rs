@@ -30,7 +30,8 @@ impl CsvSink {
         if !file_exists {
             // initialize headers
             let mut s = String::new();
-            s += "timestamp_ns,";
+            s += "inserted_ns,";
+            s += "published_ns,";
 
             for i in 1..depth + 1 {
                 s += &format!("bid_p_{i},");
@@ -53,7 +54,8 @@ impl CsvSink {
 }
 
 impl OrderBookSink for CsvSink {
-    /// Saves order book in wide format. Number of columns will be equal to order book depth * 4.
+    /// Saves order book in wide format. Number of columns will be equal
+    /// to order book depth * 4 + 2.
     /// First price, quatitity pairs from bids are written, then from asks.
     fn write(&mut self, ob: &OrderBook) -> Result<()> {
         let mut writer = BufWriter::new(&self.file);
@@ -64,6 +66,7 @@ impl OrderBookSink for CsvSink {
         // not when it became available on the exchange or delivered to us (though latter should be
         // close)
         s += &(Utc::now().timestamp_nanos_opt().unwrap().to_string() + ",");
+        s += &(ob.timestamp.timestamp_nanos_opt().unwrap().to_string() + ",");
 
         // write (p,q) starting from best bid
         let mut i = 0;
@@ -114,6 +117,8 @@ impl OrderBookSink for CsvSink {
 mod tests {
     use std::fs;
 
+    use chrono::Utc;
+
     use crate::{
         book::order_book::{BookUpdate, Level, OrderBook},
         store::{OrderBookSink, csv::CsvSink},
@@ -134,9 +139,9 @@ mod tests {
         // this checks that header has expected number of elements;
         // we expect depth (10) * 4 + 1 (for timestamp_ms column)
         let (first_row, _) = contents.split_once("\n").unwrap();
-        assert_eq!(first_row.split(",").collect::<Vec<&str>>().len(), 41);
+        assert_eq!(first_row.split(",").collect::<Vec<&str>>().len(), 42);
 
-        let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0);
+        let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0, Utc::now());
 
         ob.apply_update(BookUpdate {
             bids: Some(vec![
@@ -168,6 +173,7 @@ mod tests {
                     quantity: 3,
                 },
             ]),
+            timestamp: Utc::now(),
         })
         .unwrap();
 
@@ -179,7 +185,8 @@ mod tests {
         let contents = fs::read_to_string(file.path()).unwrap();
         // drop header
         let (_, contents) = contents.split_once("\n").unwrap();
-        // drop timestamp_ms
+        // drop timestamp_ns, then published_ns
+        let (_, contents) = contents.split_once(",").unwrap();
         let (_, contents) = contents.split_once(",").unwrap();
         assert_eq!(
             contents,
@@ -208,6 +215,7 @@ mod tests {
                     quantity: 3,
                 },
             ]),
+            timestamp: Utc::now(),
         })
         .unwrap();
 
@@ -221,6 +229,8 @@ mod tests {
         // remove timestamp_ms from both rows and then concatenate
         let (first_row, second_row) = contents.split_once("\n").unwrap();
         let (_, first_row) = first_row.split_once(",").unwrap();
+        let (_, first_row) = first_row.split_once(",").unwrap();
+        let (_, second_row) = second_row.split_once(",").unwrap();
         let (_, second_row) = second_row.split_once(",").unwrap();
 
         let contents = first_row.to_string() + "\n" + second_row;

@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::{collections::BTreeMap, num::ParseIntError};
 use thiserror::Error;
 
@@ -37,6 +37,7 @@ pub struct OrderBook {
     pub asks: BTreeMap<i64, i64>,
     pub pair_decimals: usize,
     pub lot_decimals: usize,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug)]
@@ -50,10 +51,17 @@ pub struct BookUpdate {
     // TODO could be just empty vectors instead of options
     pub bids: Option<Vec<Level>>,
     pub asks: Option<Vec<Level>>,
+    pub timestamp: DateTime<Utc>,
 }
 
 impl OrderBook {
-    pub fn new(name: String, depth: u16, pair_decimals: usize, lot_decimals: usize) -> OrderBook {
+    pub fn new(
+        name: String,
+        depth: u16,
+        pair_decimals: usize,
+        lot_decimals: usize,
+        timestamp: DateTime<Utc>,
+    ) -> OrderBook {
         OrderBook {
             name,
             depth,
@@ -61,6 +69,7 @@ impl OrderBook {
             lot_decimals,
             asks: BTreeMap::new(),
             bids: BTreeMap::new(),
+            timestamp,
         }
     }
 
@@ -90,6 +99,8 @@ impl OrderBook {
         while self.asks.len() as u16 > self.depth {
             self.asks.pop_last();
         }
+
+        self.timestamp = update.timestamp;
 
         Ok(())
     }
@@ -197,6 +208,7 @@ mod tests {
         BookUpdate {
             bids: Some(bids),
             asks: Some(asks),
+            timestamp: Utc::now(),
         }
     }
 
@@ -236,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_order_book_trims_to_depth() {
-        let mut book = OrderBook::new(book_name(), 10, 2, 8);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, Utc::now());
 
         let update = get_update(10, 100, 42);
         book.apply_update(update).unwrap();
@@ -252,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_order_book_overwrites_quantities() {
-        let mut book = OrderBook::new(book_name(), 10, 2, 8);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, Utc::now());
 
         let update = get_update(2, 100, 42);
         book.apply_update(update).unwrap();
@@ -272,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_order_book_all_price_levels_present() {
-        let mut book = OrderBook::new(book_name(), 10, 2, 8);
+        let mut book = OrderBook::new(book_name(), 10, 2, 8, Utc::now());
 
         let update = get_update(1, 100, 42);
         book.apply_update(update).unwrap();
@@ -288,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_top_of_book_returns_correct_values() {
-        let mut book = OrderBook::new("dummy".to_string(), 10, 0, 0);
+        let mut book = OrderBook::new("dummy".to_string(), 10, 0, 0, Utc::now());
 
         // basic one level test
         book.apply_update(get_update(1, 100, 40)).unwrap();
@@ -349,6 +361,7 @@ mod tests {
                 price: 99,
                 quantity: 0,
             }]),
+            timestamp: Utc::now(),
         })
         .unwrap();
 
@@ -368,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_empty_book_return_error() {
-        let mut book = OrderBook::new("dummy".to_string(), 10, 0, 0);
+        let mut book = OrderBook::new("dummy".to_string(), 10, 0, 0, Utc::now());
 
         let top = book.top_of_book();
         assert_eq!(top, Err(OrderBookError::BookEmpty));
@@ -379,6 +392,7 @@ mod tests {
                 quantity: 42,
             }]),
             asks: None,
+            timestamp: Utc::now(),
         })
         .unwrap();
 
@@ -395,6 +409,7 @@ mod tests {
                 price: 24,
                 quantity: 42,
             }]),
+            timestamp: Utc::now(),
         })
         .unwrap();
 

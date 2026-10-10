@@ -14,13 +14,13 @@ use crate::book::order_book::int_to_float;
 use crate::store::OrderBookSink;
 
 #[derive(Debug)]
-pub struct ParquetStore {
+pub struct ParquetSink {
     writer: Option<ArrowWriter<File>>,
     schema: Arc<Schema>,
 }
 
-impl ParquetStore {
-    pub fn new(symbol: String, depth: usize, file_path: Option<PathBuf>) -> ParquetStore {
+impl ParquetSink {
+    pub fn new(symbol: String, depth: usize, file_path: Option<PathBuf>) -> ParquetSink {
         let file_path = match file_path {
             Some(path) => {
                 if Path::exists(&path) {
@@ -47,7 +47,10 @@ impl ParquetStore {
             .open(&file_path)
             .unwrap();
 
-        let mut fields = vec![Field::new("timestamp_ns", DataType::Int64, false)];
+        let mut fields = vec![
+            Field::new("inserted_ns", DataType::Int64, false),
+            Field::new("published_ns", DataType::Int64, true),
+        ];
 
         for i in 1..depth + 1 {
             fields.push(Field::new(format!("bid_p_{i}"), DataType::Float64, false));
@@ -67,7 +70,7 @@ impl ParquetStore {
 
         let writer = ArrowWriter::try_new(file, schema.clone(), Some(props)).unwrap();
 
-        ParquetStore {
+        ParquetSink {
             writer: Some(writer),
             schema,
         }
@@ -84,18 +87,22 @@ impl ParquetStore {
     }
 }
 
-impl Drop for ParquetStore {
+impl Drop for ParquetSink {
     fn drop(&mut self) {
         let _ = self.finish();
     }
 }
 
-impl OrderBookSink for ParquetStore {
+impl OrderBookSink for ParquetSink {
     fn write(&mut self, ob: &OrderBook) -> Result<()> {
-        let now = Utc::now().timestamp_nanos_opt().unwrap();
-        let timestamp = Int64Array::from(vec![now]);
+        let now = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("timestamp should be available");
 
-        let mut columns: Vec<ArrayRef> = vec![Arc::new(timestamp)];
+        let timestamp = Int64Array::from(vec![now]);
+        let published = Int64Array::from(vec![ob.timestamp.timestamp_nanos_opt()]);
+
+        let mut columns: Vec<ArrayRef> = vec![Arc::new(timestamp), Arc::new(published)];
 
         let mut i = 0;
         for (p, q) in ob.bids.iter().rev() {
@@ -161,20 +168,21 @@ mod tests {
     use std::fs::File;
 
     use arrow_array::Float64Array;
+    use chrono::Utc;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     use crate::{
         book::order_book::{BookUpdate, Level, OrderBook},
-        store::{OrderBookSink, parquet::ParquetStore},
+        store::{OrderBookSink, parquet::ParquetSink},
     };
 
     #[test]
     fn test_parquet_store() {
         let depth = 3;
         let path = tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
-        let mut store = ParquetStore::new("ETH/USD".to_string(), depth, Some(path.clone()));
+        let mut store = ParquetSink::new("ETH/USD".to_string(), depth, Some(path.clone()));
 
-        let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0);
+        let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0, Utc::now());
 
         ob.apply_update(BookUpdate {
             bids: Some(vec![
@@ -206,6 +214,7 @@ mod tests {
                     quantity: 3,
                 },
             ]),
+            timestamp: Utc::now(),
         })
         .unwrap();
 
@@ -221,8 +230,8 @@ mod tests {
 
         let value = reader.next().unwrap().unwrap();
 
-        // depth * 4 + 1
-        assert_eq!(value.num_columns(), 13);
+        // depth * 4 + 2
+        assert_eq!(value.num_columns(), 14);
         assert_eq!(value.num_rows(), 1);
 
         assert_eq!(
