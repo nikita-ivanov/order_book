@@ -2,62 +2,24 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use futures_util::StreamExt;
 use serde_json::Number;
-use std::{collections::HashMap, num::ParseIntError};
-use thiserror::Error;
+use std::collections::HashMap;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::kraken::core::{Receiver, connect, request_channels};
+use crate::kraken::core::{Receiver, SymbolState, connect, request_channels};
+use crate::kraken::error::KrakenFeedError;
 use crate::{
-    book::order_book::{BookUpdate, Level, OrderBook, OrderBookError},
+    book::order_book::OrderBook,
     kraken::{
         models::{BasicInfo, BasicInfoResult, BookMessage},
-        precision::{AssetPairPrecision, get_precision},
+        precision::get_precision,
     },
     store::OrderBookSink,
 };
 
-#[derive(Debug, Error, PartialEq)]
-pub enum KrakenFeedError {
-    #[error(
-        "Received number from exchange with higher precision than expected ({precision}): {number:?}"
-    )]
-    PrecisionExceeded { precision: usize, number: String },
-
-    #[error("Failed to convert string number to integer: {number}")]
-    InvalidNumber {
-        number: String,
-        #[source]
-        source: ParseIntError,
-    },
-
-    #[error("Computed checksum ({computed}) does not match received one ({received})")]
-    ChecksumMismatch { computed: u32, received: u32 },
-
-    #[error("No bids or asks in the order book")]
-    BookEmpty,
-
-    #[error("Error applying update to the order book: {source:?}")]
-    OrderBookError {
-        #[source]
-        source: OrderBookError,
-    },
-
-    // TODO can we pass the actual error message here?
-    // tried to use serde_json::Error as source but it does not implement PartialEq
-    #[error("Error deserializing exchange message. Message was {message:?}")]
-    DeserializationError { message: Message },
-
-    #[error("Unknown message: {message}")]
-    UnknownMessage { message: Message },
-}
-
 pub struct KrakenFeed {
-    pub symbols: Vec<String>,
-    pub depth: u16,
-    pub order_books: HashMap<String, OrderBook>,
-    precisions: HashMap<String, AssetPairPrecision>,
     verify_checksum: bool,
-    stores: Option<HashMap<String, Box<dyn OrderBookSink>>>,
+    depth: u16,
+    symbol_states: HashMap<String, SymbolState>,
 }
 
 impl KrakenFeed {
@@ -66,13 +28,14 @@ impl KrakenFeed {
         symbols: &[String],
         depth: u16,
         verify_checksum: bool,
-        stores: HashMap<String, Box<dyn OrderBookSink>>,
+        mut stores: HashMap<String, Box<dyn OrderBookSink>>,
     ) -> Result<KrakenFeed> {
-        let precisions = get_precision(symbols).await?;
-        let mut books = HashMap::<String, OrderBook>::new();
+        let mut precisions = get_precision(symbols).await?;
 
-        for (symbol, precision) in precisions.iter() {
-            // TODO I don't like that we have ~5 string allocations here
+        let mut states: HashMap<String, SymbolState> = HashMap::new();
+
+        for symbol in symbols {
+            let precision = precisions.remove(symbol).unwrap();
 
             let ob = OrderBook::new(
                 String::from(symbol),
@@ -82,20 +45,24 @@ impl KrakenFeed {
                 Utc::now(),
             );
 
-            books.insert(String::from(symbol), ob);
+            let state = SymbolState {
+                depth,
+                order_book: ob,
+                precision,
+                store: stores.remove(symbol).unwrap(),
+            };
+
+            states.insert(symbol.clone(), state);
         }
 
         Ok(KrakenFeed {
-            symbols: Vec::from(symbols),
-            depth,
-            precisions,
-            order_books: books,
             verify_checksum,
-            stores: Some(stores),
+            depth,
+            symbol_states: states,
         })
     }
 
-    fn process(&mut self, message: Message) -> Result<&OrderBook, KrakenFeedError> {
+    fn process(&mut self, message: Message) -> Result<OrderBook, KrakenFeedError> {
         let Message::Text(bytes) = &message else {
             println!("Message was not of the text type, will skip. {message:?}");
             return Err(KrakenFeedError::UnknownMessage { message });
@@ -120,76 +87,21 @@ impl KrakenFeed {
             }
         };
 
-        let message_data = &message.data[0];
+        let book_data = &message.data[0];
 
-        let symbol = &message_data.symbol;
-        let order_book = match self.order_books.get_mut(symbol) {
-            Some(book) => book,
-            None => panic!("could not find order book {symbol}"),
-        };
-
-        let precisions = self.precisions.get(symbol).unwrap();
-
-        let mut bids = Vec::<Level>::new();
-        for bid in &message_data.bids {
-            let price = KrakenFeed::number_to_i64(&bid.price, precisions.pair_decimals)?;
-            let quantity = KrakenFeed::number_to_i64(&bid.qty, precisions.lot_decimals)?;
-            bids.push(Level { price, quantity })
-        }
-
-        let mut asks = Vec::<Level>::new();
-        for ask in &message_data.asks {
-            let price = KrakenFeed::number_to_i64(&ask.price, precisions.pair_decimals)?;
-            let quantity = KrakenFeed::number_to_i64(&ask.qty, precisions.lot_decimals)?;
-            asks.push(Level { price, quantity })
-        }
-
-        let book_update = BookUpdate {
-            bids: Some(bids),
-            asks: Some(asks),
-            timestamp: message.data[0].timestamp,
-        };
-
-        let _ = match order_book.apply_update(book_update) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(KrakenFeedError::OrderBookError { source: e }),
-        };
-
-        if self.verify_checksum {
-            let bids: &Vec<(i64, i64)> = &order_book
-                .bids
-                .iter()
-                .map(|pair| (*pair.0, *pair.1))
-                .collect();
-
-            let asks: &Vec<(i64, i64)> = &order_book
-                .asks
-                .iter()
-                .map(|pair| (*pair.0, *pair.1))
-                .collect();
-
-            let computed_checksum = KrakenFeed::compute_checksum(bids, asks);
-
-            let received_checksum = message.data[0].checksum;
-
-            if computed_checksum != received_checksum {
-                return Err(KrakenFeedError::ChecksumMismatch {
-                    computed: computed_checksum,
-                    received: received_checksum,
+        let symbol = &book_data.symbol;
+        let symbol_state = match self.symbol_states.get_mut(symbol) {
+            Some(state) => state,
+            None => {
+                return Err(KrakenFeedError::OtherError {
+                    info: format!("Missing symbol state for {symbol}"),
                 });
             }
         };
 
-        if let Some(stores) = &mut self.stores {
-            let store = stores
-                .get_mut(symbol)
-                .expect("Store {symbol} should be there");
+        symbol_state.apply_update(book_data, self.verify_checksum)?;
 
-            // TODO this should be returned as error, currently cannot convert with ?
-            store.write(order_book).expect("failed to write data");
-        }
-
-        Ok(order_book)
+        Ok(symbol_state.order_book.clone())
     }
 
     async fn receiving_loop(&mut self, rx: &mut Receiver) -> Result<()> {
@@ -250,6 +162,8 @@ impl KrakenFeed {
                         "Error during order book processing, try to reconnect. Error was\n{source:?}"
                     ));
                 }
+
+                Err(KrakenFeedError::OtherError { info }) => return Err(anyhow!(info)),
             };
         }
 
@@ -260,40 +174,14 @@ impl KrakenFeed {
         let ws = connect().await?;
         let (mut tx, mut rx) = ws.split();
 
-        request_channels(&mut tx, &self.symbols, self.depth as usize).await?;
+        let symbols: Vec<String> = self.symbol_states.keys().map(|x| String::from(x)).collect();
+
+        request_channels(&mut tx, &symbols, self.depth as usize).await?;
 
         match self.receiving_loop(&mut rx).await {
             Ok(()) => Ok(()),
             Err(other) => Err(anyhow!("received unexpected error during loop: {other:?}")),
         }
-    }
-
-    fn compute_checksum(bids: &[(i64, i64)], asks: &[(i64, i64)]) -> u32 {
-        // kraken computes checksum on the first 10 entries
-        let bids = bids.iter().rev().take(10);
-        let asks = asks.iter().take(10);
-
-        let mut concatenated_asks = String::new();
-        for ask in asks {
-            let parsed_price = ask.0.to_string();
-            let parsed_qty = ask.1.to_string();
-
-            concatenated_asks.push_str(&parsed_price);
-            concatenated_asks.push_str(&parsed_qty);
-        }
-
-        let mut concatenated_bids = String::new();
-        for bid in bids {
-            let parsed_price = bid.0.to_string();
-            let parsed_qty = bid.1.to_string();
-
-            concatenated_bids.push_str(&parsed_price);
-            concatenated_bids.push_str(&parsed_qty);
-        }
-
-        let asks_and_bids = concatenated_asks + &concatenated_bids[..];
-
-        crc32fast::hash(asks_and_bids.as_bytes())
     }
 
     fn number_to_i64(number: &Number, precision: usize) -> Result<i64, KrakenFeedError> {

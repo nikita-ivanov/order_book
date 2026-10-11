@@ -29,7 +29,7 @@ pub fn int_to_float(number: i64, precision: usize) -> f64 {
 // also think they are should be coupled to the book because it is not interpretable without them.
 // TODO is it ok that all fields are public?
 // TODO would it make sense to add timestamp for the last state as reported by exchange/source?
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OrderBook {
     pub name: String,
     pub depth: u16,

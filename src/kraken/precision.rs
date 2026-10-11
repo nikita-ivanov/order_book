@@ -9,7 +9,7 @@ struct AssetPairResponse {
     result: HashMap<String, AssetPairPrecision>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct AssetPairPrecision {
     pub pair_decimals: usize,
     pub lot_decimals: usize,
