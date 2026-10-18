@@ -4,10 +4,17 @@ mod parquet;
 
 use std::collections::HashMap;
 
-use crate::{book::order_book::OrderBook, store::parquet::ParquetSink};
+use crate::{book::snapshot::OrderBookSnapshot, store::parquet::ParquetSink};
 
 pub trait OrderBookSink {
-    fn write(&mut self, ob: &OrderBook) -> Result<()>;
+    fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()>;
+}
+
+pub struct NoOpSink;
+impl OrderBookSink for NoOpSink {
+    fn write(&mut self, _ob: &OrderBookSnapshot) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub fn construct_file_stores(

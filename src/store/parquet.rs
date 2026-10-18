@@ -9,8 +9,7 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::book::order_book::OrderBook;
-use crate::book::order_book::int_to_float;
+use crate::book::snapshot::OrderBookSnapshot;
 use crate::store::OrderBookSink;
 
 #[derive(Debug)]
@@ -94,7 +93,7 @@ impl Drop for ParquetSink {
 }
 
 impl OrderBookSink for ParquetSink {
-    fn write(&mut self, ob: &OrderBook) -> Result<()> {
+    fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()> {
         let now = Utc::now()
             .timestamp_nanos_opt()
             .expect("timestamp should be available");
@@ -105,14 +104,11 @@ impl OrderBookSink for ParquetSink {
         let mut columns: Vec<ArrayRef> = vec![Arc::new(timestamp), Arc::new(published)];
 
         let mut i = 0;
-        for (p, q) in ob.bids.iter().rev() {
-            let price = int_to_float(*p, ob.pair_decimals);
-            let quantity = int_to_float(*q, ob.lot_decimals);
-
-            let price_col = Float64Array::from(vec![price]);
+        for (p, q) in ob.get_bids().iter() {
+            let price_col = Float64Array::from(vec![*p]);
             columns.push(Arc::new(price_col));
 
-            let quantity_col = Float64Array::from(vec![quantity]);
+            let quantity_col = Float64Array::from(vec![*q]);
             columns.push(Arc::new(quantity_col));
 
             i += 1;
@@ -130,14 +126,11 @@ impl OrderBookSink for ParquetSink {
         }
 
         let mut i = 0;
-        for (p, q) in ob.asks.iter() {
-            let price = int_to_float(*p, ob.pair_decimals);
-            let quantity = int_to_float(*q, ob.lot_decimals);
-
-            let price_col = Float64Array::from(vec![price]);
+        for (p, q) in ob.get_asks().iter() {
+            let price_col = Float64Array::from(vec![*p]);
             columns.push(Arc::new(price_col));
 
-            let quantity_col = Float64Array::from(vec![quantity]);
+            let quantity_col = Float64Array::from(vec![*q]);
             columns.push(Arc::new(quantity_col));
 
             i += 1;
@@ -167,8 +160,8 @@ impl OrderBookSink for ParquetSink {
 mod tests {
     use std::fs::File;
 
-    use arrow_array::Float64Array;
-    use chrono::Utc;
+    use arrow_array::{Float64Array, Int64Array};
+    use chrono::{DateTime, Utc};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     use crate::{
@@ -218,8 +211,9 @@ mod tests {
         })
         .unwrap();
 
-        store.write(&ob).unwrap();
+        let now = Utc::now().timestamp_nanos_opt().unwrap();
 
+        store.write(&ob.get_snapshot()).unwrap();
         store.finish().unwrap();
 
         let file = File::open(&path).unwrap();
@@ -277,5 +271,30 @@ mod tests {
                 .value(0),
             1.0
         );
+
+        // check that inserted_ns is within reasonable range from now (1 second)
+        let inserted_ns = value
+            .column_by_name("inserted_ns")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0);
+
+        assert!(inserted_ns >= now);
+        assert!(inserted_ns < now + 1000 * 1000);
+
+        let published_ns = value
+            .column_by_name("published_ns")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .value(0);
+
+        dbg!(published_ns);
+
+        assert!(published_ns >= now - 1000 * 1000);
+        assert!(published_ns < now + 1000 * 1000);
     }
 }

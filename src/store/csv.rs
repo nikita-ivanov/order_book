@@ -7,10 +7,7 @@ use std::{
 use anyhow::Result;
 use chrono::Utc;
 
-use crate::{
-    book::order_book::{OrderBook, int_to_float},
-    store::OrderBookSink,
-};
+use crate::{book::snapshot::OrderBookSnapshot, store::OrderBookSink};
 
 #[derive(Debug)]
 pub struct CsvSink {
@@ -57,7 +54,7 @@ impl OrderBookSink for CsvSink {
     /// Saves order book in wide format. Number of columns will be equal
     /// to order book depth * 4 + 2.
     /// First price, quatitity pairs from bids are written, then from asks.
-    fn write(&mut self, ob: &OrderBook) -> Result<()> {
+    fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()> {
         let mut writer = BufWriter::new(&self.file);
 
         let mut s = String::new();
@@ -70,12 +67,9 @@ impl OrderBookSink for CsvSink {
 
         // write (p,q) starting from best bid
         let mut i = 0;
-        for (p, q) in ob.bids.iter().rev() {
-            let price = int_to_float(*p, ob.pair_decimals);
-            let quantity = int_to_float(*q, ob.lot_decimals);
-
-            s = s + &price.to_string() + ",";
-            s = s + &quantity.to_string() + ",";
+        for (p, q) in ob.get_bids().iter() {
+            s = s + &p.to_string() + ",";
+            s = s + &q.to_string() + ",";
             i += 1;
         }
 
@@ -88,12 +82,9 @@ impl OrderBookSink for CsvSink {
 
         // same for asks (starting best ask)
         let mut i = 0;
-        for (p, q) in ob.asks.iter() {
-            let price = int_to_float(*p, ob.pair_decimals);
-            let quantity = int_to_float(*q, ob.lot_decimals);
-
-            s = s + &price.to_string() + ",";
-            s = s + &quantity.to_string() + ",";
+        for (p, q) in ob.get_asks().iter() {
+            s = s + &p.to_string() + ",";
+            s = s + &q.to_string() + ",";
             i += 1;
         }
 
@@ -180,7 +171,7 @@ mod tests {
         dbg!(&ob);
 
         // TODO should propagate error
-        store.write(&ob).unwrap();
+        store.write(&ob.get_snapshot()).unwrap();
 
         let contents = fs::read_to_string(file.path()).unwrap();
         // drop header
@@ -221,7 +212,7 @@ mod tests {
 
         dbg!(&ob);
 
-        store.write(&ob).unwrap();
+        store.write(&ob.get_snapshot()).unwrap();
 
         let contents = fs::read_to_string(file.path()).unwrap();
         let (_, contents) = contents.split_once("\n").unwrap();

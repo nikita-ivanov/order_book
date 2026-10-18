@@ -8,7 +8,10 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 use crate::{
-    book::order_book::{BookUpdate, Level, OrderBook},
+    book::{
+        order_book::{BookUpdate, Level, OrderBook},
+        snapshot::OrderBookSnapshot,
+    },
     kraken::{error::KrakenFeedError, models::BookData, precision::AssetPairPrecision},
     store::OrderBookSink,
 };
@@ -105,18 +108,29 @@ fn compute_checksum(bids: &[(i64, i64)], asks: &[(i64, i64)]) -> u32 {
 }
 
 pub struct SymbolState {
-    pub depth: u16,
     pub order_book: OrderBook,
     pub precision: AssetPairPrecision,
     pub store: Box<dyn OrderBookSink>,
 }
 
+// TODO should have method to return order book snapshot
 impl SymbolState {
+    pub fn new(
+        order_book: OrderBook,
+        precision: AssetPairPrecision,
+        store: Box<dyn OrderBookSink>,
+    ) -> SymbolState {
+        SymbolState {
+            order_book,
+            precision,
+            store,
+        }
+    }
     pub fn apply_update(
         &mut self,
         book_data: &BookData,
         verify_checksum: bool,
-    ) -> Result<(), KrakenFeedError> {
+    ) -> Result<OrderBookSnapshot, KrakenFeedError> {
         let mut bids = Vec::<Level>::new();
         for bid in &book_data.bids {
             let price = number_to_i64(&bid.price, self.precision.pair_decimals)?;
@@ -169,9 +183,9 @@ impl SymbolState {
         };
 
         self.store
-            .write(&self.order_book)
+            .write(&self.order_book.get_snapshot())
             .map_err(|e| KrakenFeedError::StoreError { source: e })?;
 
-        Ok(())
+        Ok(self.order_book.get_snapshot())
     }
 }
