@@ -74,16 +74,6 @@ impl ParquetSink {
             schema,
         }
     }
-
-    pub fn finish(&mut self) -> Result<()> {
-        match self.writer.take() {
-            Some(mut writer) => match writer.finish() {
-                Ok(_) => Ok(()),
-                Err(e) => Err(anyhow!("failed to finish the writer, error was: {e:?}")),
-            },
-            None => Ok(()),
-        }
-    }
 }
 
 impl Drop for ParquetSink {
@@ -154,6 +144,16 @@ impl OrderBookSink for ParquetSink {
             None => Err(anyhow!("writer already closed")),
         }
     }
+
+    fn finish(&mut self) -> Result<()> {
+        match self.writer.take() {
+            Some(mut writer) => match writer.finish() {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e.into()),
+            },
+            None => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -161,7 +161,7 @@ mod tests {
     use std::fs::File;
 
     use arrow_array::{Float64Array, Int64Array};
-    use chrono::{DateTime, Utc};
+    use chrono::Utc;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     use crate::{

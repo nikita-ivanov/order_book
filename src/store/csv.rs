@@ -102,6 +102,10 @@ impl OrderBookSink for CsvSink {
 
         Ok(())
     }
+
+    fn finish(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
