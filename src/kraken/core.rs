@@ -1,3 +1,5 @@
+use std::sync::mpsc::Sender;
+
 use anyhow::Result;
 use futures_util::{
     SinkExt,
@@ -110,7 +112,7 @@ fn compute_checksum(bids: &[(i64, i64)], asks: &[(i64, i64)]) -> u32 {
 pub struct SymbolState {
     pub order_book: OrderBook,
     pub precision: AssetPairPrecision,
-    pub store: Box<dyn OrderBookSink>,
+    pub store: Sender<OrderBookSnapshot>,
 }
 
 // TODO should have method to return order book snapshot
@@ -118,7 +120,8 @@ impl SymbolState {
     pub fn new(
         order_book: OrderBook,
         precision: AssetPairPrecision,
-        store: Box<dyn OrderBookSink>,
+        // store: Box<dyn OrderBookSink>,
+        store: Sender<OrderBookSnapshot>,
     ) -> SymbolState {
         SymbolState {
             order_book,
@@ -183,8 +186,8 @@ impl SymbolState {
         };
 
         self.store
-            .write(&self.order_book.get_snapshot())
-            .map_err(|e| KrakenFeedError::StoreError { source: e })?;
+            .send(self.order_book.get_snapshot())
+            .map_err(|e| KrakenFeedError::StoreError { source: e.into() })?;
 
         Ok(self.order_book.get_snapshot())
     }

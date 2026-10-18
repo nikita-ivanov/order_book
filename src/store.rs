@@ -1,6 +1,7 @@
 mod csv;
 use anyhow::Result;
 mod parquet;
+pub mod writer;
 
 use std::collections::HashMap;
 

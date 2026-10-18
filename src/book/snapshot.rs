@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::book::{core::int_to_float, error::OrderBookError};
 
+#[derive(Debug)]
 pub struct OrderBookSnapshot {
     pub depth: u16,
     pub timestamp: DateTime<Utc>,

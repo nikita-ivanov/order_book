@@ -2,8 +2,10 @@ use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use futures_util::StreamExt;
 use std::collections::HashMap;
+use std::sync::mpsc::Sender;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::book::snapshot::OrderBookSnapshot;
 use crate::kraken::core::{Receiver, SymbolState, connect, request_channels};
 use crate::kraken::error::KrakenFeedError;
 use crate::{
@@ -27,7 +29,8 @@ impl KrakenFeed {
         symbols: &[String],
         depth: u16,
         verify_checksum: bool,
-        mut stores: HashMap<String, Box<dyn OrderBookSink>>,
+        // mut stores: HashMap<String, Box<dyn OrderBookSink>>,
+        ob_writer: Sender<OrderBookSnapshot>,
     ) -> Result<KrakenFeed> {
         let mut precisions = get_precision(symbols).await?;
 
@@ -44,7 +47,7 @@ impl KrakenFeed {
                 Utc::now(),
             );
 
-            let state = SymbolState::new(ob, precision, stores.remove(symbol).unwrap());
+            let state = SymbolState::new(ob, precision, ob_writer.clone());
 
             states.insert(symbol.clone(), state);
         }
