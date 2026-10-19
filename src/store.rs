@@ -26,8 +26,8 @@ impl OrderBookSink for NoOpSink {
 pub fn construct_file_stores(
     symbols: &Vec<String>,
     depth: usize,
-) -> HashMap<String, Box<dyn OrderBookSink>> {
-    let mut stores = HashMap::<String, Box<dyn OrderBookSink>>::new();
+) -> HashMap<String, Box<dyn OrderBookSink + Send>> {
+    let mut stores = HashMap::<String, Box<dyn OrderBookSink + Send>>::new();
     for symbol in symbols {
         stores.insert(
             String::from(symbol),

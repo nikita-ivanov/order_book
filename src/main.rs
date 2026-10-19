@@ -48,21 +48,17 @@ async fn main() -> Result<()> {
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
+    let stores = construct_file_stores(&args.symbols, args.depth);
+    let mut book_writer = BookWriter::new(stores);
+
     let (tx, rx) = channel::<OrderBookSnapshot>();
 
     let writer_handler = thread::spawn(move || {
-        // TODO this should come from CLI args
         // TODO hardcoded for testing
-        let stores = construct_file_stores(&vec!["ETH/USD".to_string()], args.depth);
-
-        let mut book_writer = BookWriter::new(stores);
-
         loop {
             match rx.recv() {
                 Ok(snapshot) => {
-                    book_writer
-                        .process("ETH/USD".to_string(), snapshot)
-                        .unwrap();
+                    book_writer.process(&snapshot.name, &snapshot).unwrap();
                 }
                 Err(_) => {
                     println!("finishing all stores");

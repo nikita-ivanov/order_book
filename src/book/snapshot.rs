@@ -8,7 +8,7 @@ use crate::book::{core::int_to_float, error::OrderBookError};
 pub struct OrderBookSnapshot {
     pub depth: u16,
     pub timestamp: DateTime<Utc>,
-    name: String,
+    pub name: String,
     bids: BTreeMap<i64, i64>,
     asks: BTreeMap<i64, i64>,
     pair_decimals: usize,

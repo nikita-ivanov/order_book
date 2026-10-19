@@ -14,7 +14,6 @@ use crate::{
         models::{BasicInfo, BasicInfoResult, BookMessage},
         precision::get_precision,
     },
-    store::OrderBookSink,
 };
 
 pub struct KrakenFeed {
@@ -183,17 +182,19 @@ impl KrakenFeed {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        sync::mpsc::{Receiver, channel},
+    };
     use tokio_tungstenite::tungstenite::{Bytes, Message, Utf8Bytes};
 
     use crate::{
-        book::order_book::OrderBook,
+        book::{order_book::OrderBook, snapshot::OrderBookSnapshot},
         kraken::{
             core::SymbolState,
             feed::{KrakenFeed, KrakenFeedError},
             precision::AssetPairPrecision,
         },
-        store::NoOpSink,
     };
 
     fn get_book_message() -> Message {
@@ -266,8 +267,10 @@ mod tests {
         Message::Text(message_bytes)
     }
 
-    fn get_feed(depth: u16) -> KrakenFeed {
+    fn get_feed(depth: u16) -> (KrakenFeed, Receiver<OrderBookSnapshot>) {
         let ob = OrderBook::new("dummy order book".to_string(), depth, 1, 2, Utc::now());
+
+        let (tx, rx) = channel::<OrderBookSnapshot>();
 
         let symbol_state = SymbolState::new(
             ob,
@@ -275,21 +278,24 @@ mod tests {
                 pair_decimals: 1,
                 lot_decimals: 8,
             },
-            Box::new(NoOpSink {}),
+            tx,
         );
 
-        KrakenFeed {
-            depth,
-            verify_checksum: true,
-            symbol_states: HashMap::from([("BTC/USD".to_string(), symbol_state)]),
-        }
+        (
+            KrakenFeed {
+                depth,
+                verify_checksum: true,
+                symbol_states: HashMap::from([("BTC/USD".to_string(), symbol_state)]),
+            },
+            rx,
+        )
     }
 
     #[test]
     fn test_full_message_prcessing_passes_checksum() {
         let book_message = get_book_message();
 
-        let mut feed = get_feed(10);
+        let (mut feed, _rx) = get_feed(10);
 
         // this will verify checksum
         feed.process(book_message).unwrap();
@@ -297,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_checksum_ignores_orders_beyond_10th() {
-        let mut feed = get_feed(20);
+        let (mut feed, _rx) = get_feed(20);
 
         let real_message = get_book_message();
         feed.process(real_message).unwrap();
@@ -309,12 +315,12 @@ mod tests {
 
     #[test]
     fn test_checksum_mismatch_returns_error() {
-        let mut feed = get_feed(20);
+        let (mut feed, _rx) = get_feed(20);
 
         let real_message = get_book_message();
         feed.process(real_message).unwrap();
 
-        let mut feed = get_feed(20);
+        let (mut feed, _rx) = get_feed(20);
 
         let real_message = get_book_message();
         let _ = feed.process(real_message).unwrap();
