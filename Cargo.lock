@@ -281,6 +281,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cancellation"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7a879c84c21f354f13535f87ad119ac3be22ebb9097b552a0af6a78f86628c4"
+
+[[package]]
 name = "cc"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1091,6 +1097,7 @@ dependencies = [
  "anyhow",
  "arrow-array",
  "arrow-schema",
+ "cancellation",
  "chrono",
  "clap",
  "crc32fast",

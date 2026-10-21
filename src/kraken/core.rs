@@ -15,7 +15,7 @@ use crate::{
         snapshot::OrderBookSnapshot,
     },
     kraken::{error::KrakenFeedError, models::BookData, precision::AssetPairPrecision},
-    store::OrderBookSink,
+    store::writer::WriterCommand,
 };
 
 type WebsocketStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -112,7 +112,7 @@ fn compute_checksum(bids: &[(i64, i64)], asks: &[(i64, i64)]) -> u32 {
 pub struct SymbolState {
     pub order_book: OrderBook,
     pub precision: AssetPairPrecision,
-    pub store: Sender<OrderBookSnapshot>,
+    pub writer: Sender<WriterCommand>,
 }
 
 // TODO should have method to return order book snapshot
@@ -121,12 +121,12 @@ impl SymbolState {
         order_book: OrderBook,
         precision: AssetPairPrecision,
         // store: Box<dyn OrderBookSink>,
-        store: Sender<OrderBookSnapshot>,
+        writer: Sender<WriterCommand>,
     ) -> SymbolState {
         SymbolState {
             order_book,
             precision,
-            store,
+            writer,
         }
     }
     pub fn apply_update(
@@ -185,8 +185,8 @@ impl SymbolState {
             }
         };
 
-        self.store
-            .send(self.order_book.get_snapshot())
+        self.writer
+            .send(WriterCommand::Snapshot(self.order_book.get_snapshot()))
             .map_err(|e| KrakenFeedError::StoreError { source: e.into() })?;
 
         Ok(self.order_book.get_snapshot())

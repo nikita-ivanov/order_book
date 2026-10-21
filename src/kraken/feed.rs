@@ -8,6 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::book::snapshot::OrderBookSnapshot;
 use crate::kraken::core::{Receiver, SymbolState, connect, request_channels};
 use crate::kraken::error::KrakenFeedError;
+use crate::store::writer::WriterCommand;
 use crate::{
     book::order_book::OrderBook,
     kraken::{
@@ -29,7 +30,7 @@ impl KrakenFeed {
         depth: u16,
         verify_checksum: bool,
         // mut stores: HashMap<String, Box<dyn OrderBookSink>>,
-        ob_writer: Sender<OrderBookSnapshot>,
+        ob_writer: Sender<WriterCommand>,
     ) -> Result<KrakenFeed> {
         let mut precisions = get_precision(symbols).await?;
 

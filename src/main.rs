@@ -1,10 +1,6 @@
-use std::{sync::mpsc::channel, thread};
-
-use clap::Parser;
-
 use anyhow::Result;
+use clap::Parser;
 use kraken_l3::{
-    book::snapshot::OrderBookSnapshot,
     kraken::feed::KrakenFeed,
     retry::{ExponentialRetryPolicy, NoRetryPolicy, RetryDecision, RetryPolicy, RetryPolicyKind},
     store::{construct_file_stores, writer::BookWriter},
@@ -49,28 +45,9 @@ async fn main() -> Result<()> {
     };
 
     let stores = construct_file_stores(&args.symbols, args.depth);
-    let mut book_writer = BookWriter::new(stores);
-
-    let (tx, rx) = channel::<OrderBookSnapshot>();
-
-    let writer_handler = thread::spawn(move || {
-        // TODO hardcoded for testing
-        loop {
-            match rx.recv() {
-                Ok(snapshot) => {
-                    book_writer.process(&snapshot.name, &snapshot).unwrap();
-                }
-                Err(_) => {
-                    println!("finishing all stores");
-                    book_writer.finish().unwrap();
-                    println!("finished all stores");
-                    break;
-                }
-            };
-        }
-    });
-
-    let mut feed = KrakenFeed::new(&args.symbols, args.depth as u16, true, tx).await?;
+    let book_writer = BookWriter::new(stores);
+    let mut feed =
+        KrakenFeed::new(&args.symbols, args.depth as u16, true, book_writer.sender()).await?;
 
     loop {
         tokio::select! {
@@ -101,9 +78,7 @@ async fn main() -> Result<()> {
         };
     }
 
-    // TODO is it ok to drop in order to shutdown tx and hence rx thread?
-    drop(feed);
-    writer_handler.join().unwrap();
+    book_writer.shutdown();
 
     Ok(())
 }
