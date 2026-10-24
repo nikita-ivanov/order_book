@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::book::snapshot::OrderBookSnapshot;
 use crate::kraken::core::{Receiver, SymbolState, connect, request_channels};
 use crate::kraken::error::KrakenFeedError;
 use crate::store::writer::WriterCommand;
@@ -190,12 +189,13 @@ mod tests {
     use tokio_tungstenite::tungstenite::{Bytes, Message, Utf8Bytes};
 
     use crate::{
-        book::{order_book::OrderBook, snapshot::OrderBookSnapshot},
+        book::order_book::OrderBook,
         kraken::{
             core::SymbolState,
             feed::{KrakenFeed, KrakenFeedError},
             precision::AssetPairPrecision,
         },
+        store::writer::WriterCommand,
     };
 
     fn get_book_message() -> Message {
@@ -268,10 +268,10 @@ mod tests {
         Message::Text(message_bytes)
     }
 
-    fn get_feed(depth: u16) -> (KrakenFeed, Receiver<OrderBookSnapshot>) {
+    fn get_feed(depth: u16) -> (KrakenFeed, Receiver<WriterCommand>) {
         let ob = OrderBook::new("dummy order book".to_string(), depth, 1, 2, Utc::now());
 
-        let (tx, rx) = channel::<OrderBookSnapshot>();
+        let (tx, rx) = channel::<WriterCommand>();
 
         let symbol_state = SymbolState::new(
             ob,
