@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use futures_util::StreamExt;
-use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -12,49 +11,47 @@ use crate::{
     book::order_book::OrderBook,
     kraken::{
         models::{BasicInfo, BasicInfoResult, BookMessage},
-        precision::get_precision,
+        precision::get_precisions,
     },
 };
 
 pub struct KrakenFeed {
     verify_checksum: bool,
     depth: u16,
-    symbol_states: HashMap<String, SymbolState>,
+    symbol_state: SymbolState,
 }
 
 impl KrakenFeed {
     // TODO It would probably make more sense to restrict one feed to one symbol?
     pub async fn new(
-        symbols: &[String],
+        symbol: &str,
         depth: u16,
         verify_checksum: bool,
-        // mut stores: HashMap<String, Box<dyn OrderBookSink>>,
         ob_writer: Sender<WriterCommand>,
     ) -> Result<KrakenFeed> {
-        let mut precisions = get_precision(symbols).await?;
+        let precisions = get_precisions(&[symbol]).await?;
 
-        let mut states: HashMap<String, SymbolState> = HashMap::new();
+        let Some(precision) = precisions.get(symbol) else {
+            return Err(KrakenFeedError::OtherError {
+                info: "Failed to get precision from Kraken API".to_string(),
+            }
+            .into());
+        };
 
-        for symbol in symbols {
-            let precision = precisions.remove(symbol).unwrap();
+        let ob = OrderBook::new(
+            String::from(symbol),
+            depth,
+            precision.pair_decimals,
+            precision.lot_decimals,
+            Utc::now(),
+        );
 
-            let ob = OrderBook::new(
-                String::from(symbol),
-                depth,
-                precision.pair_decimals,
-                precision.lot_decimals,
-                Utc::now(),
-            );
-
-            let state = SymbolState::new(ob, precision, ob_writer.clone());
-
-            states.insert(symbol.clone(), state);
-        }
+        let symbol_state = SymbolState::new(symbol, ob, *precision, ob_writer.clone());
 
         Ok(KrakenFeed {
             verify_checksum,
             depth,
-            symbol_states: states,
+            symbol_state,
         })
     }
 
@@ -85,20 +82,10 @@ impl KrakenFeed {
 
         let book_data = &message.data[0];
 
-        let symbol = &book_data.symbol;
-        let symbol_state = match self.symbol_states.get_mut(symbol) {
-            Some(state) => state,
-            None => {
-                return Err(KrakenFeedError::OtherError {
-                    info: format!("Missing symbol state for {symbol}"),
-                });
-            }
-        };
+        self.symbol_state
+            .apply_update(book_data, self.verify_checksum)?;
 
-        symbol_state.apply_update(book_data, self.verify_checksum)?;
-
-        // TODO this is probably not ok
-        Ok(symbol_state)
+        Ok(&self.symbol_state)
     }
 
     async fn receiving_loop(&mut self, rx: &mut Receiver) -> Result<()> {
@@ -168,9 +155,7 @@ impl KrakenFeed {
         let ws = connect().await?;
         let (mut tx, mut rx) = ws.split();
 
-        let symbols: Vec<String> = self.symbol_states.keys().map(String::from).collect();
-
-        request_channels(&mut tx, &symbols, self.depth as usize).await?;
+        request_channels(&mut tx, &[&self.symbol_state.name], self.depth as usize).await?;
 
         match self.receiving_loop(&mut rx).await {
             Ok(()) => Ok(()),
@@ -182,10 +167,7 @@ impl KrakenFeed {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use std::{
-        collections::HashMap,
-        sync::mpsc::{Receiver, channel},
-    };
+    use std::sync::mpsc::{Receiver, channel};
     use tokio_tungstenite::tungstenite::{Bytes, Message, Utf8Bytes};
 
     use crate::{
@@ -274,6 +256,7 @@ mod tests {
         let (tx, rx) = channel::<WriterCommand>();
 
         let symbol_state = SymbolState::new(
+            "BTC/USD",
             ob,
             AssetPairPrecision {
                 pair_decimals: 1,
@@ -286,7 +269,7 @@ mod tests {
             KrakenFeed {
                 depth,
                 verify_checksum: true,
-                symbol_states: HashMap::from([("BTC/USD".to_string(), symbol_state)]),
+                symbol_state,
             },
             rx,
         )

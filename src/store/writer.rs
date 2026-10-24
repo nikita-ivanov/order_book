@@ -1,33 +1,14 @@
 use anyhow::{Result, anyhow};
 use std::sync::mpsc::Sender;
+use std::sync::mpsc::channel;
 use std::thread;
 use std::thread::JoinHandle;
-use std::{collections::HashMap, sync::mpsc::channel};
 
 use crate::{book::snapshot::OrderBookSnapshot, store::OrderBookSink};
 
 pub enum WriterCommand {
     Snapshot(OrderBookSnapshot),
     Finish,
-}
-
-fn finish_stores(mut stores: HashMap<String, Box<dyn OrderBookSink + Send>>) -> Result<()> {
-    let mut errors = Vec::new();
-
-    for (store_name, store) in stores.iter_mut() {
-        let _ = store.finish().map_err(|e| errors.push((store_name, e)));
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        let num_errors = errors.len();
-        let total_stores = stores.len();
-
-        Err(anyhow!(format!(
-            "failed to finish {num_errors}/{total_stores} stores"
-        )))
-    }
 }
 
 /// BookWriter is responsible for saving orderer book shapshots. It runs in a separate OS thread.
@@ -38,7 +19,7 @@ pub struct BookWriter {
 }
 
 impl BookWriter {
-    pub fn new(mut stores: HashMap<String, Box<dyn OrderBookSink + Send>>) -> BookWriter {
+    pub fn new(mut store: Box<dyn OrderBookSink + Send>) -> BookWriter {
         let (sender, receiver) = channel::<WriterCommand>();
 
         let handle = thread::spawn(move || -> Result<()> {
@@ -46,29 +27,17 @@ impl BookWriter {
                 let command = match receiver.recv() {
                     Ok(s) => s,
                     Err(_) => {
-                        finish_stores(stores)?;
+                        store.finish()?;
                         break;
                     }
                 };
 
                 match command {
                     WriterCommand::Snapshot(snapshot) => {
-                        let snapshot_name = &snapshot.name;
-
-                        let store = match stores.get_mut(snapshot_name) {
-                            Some(s) => s,
-                            None => {
-                                // TODO add custom errors?
-                                return Err(anyhow!(format!(
-                                    "Could not find store for snapshot {snapshot_name}, will skip"
-                                )));
-                            }
-                        };
-
                         store.write(&snapshot).unwrap();
                     }
                     WriterCommand::Finish => {
-                        finish_stores(stores)?;
+                        store.finish()?;
                         break;
                     }
                 }

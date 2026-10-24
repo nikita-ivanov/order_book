@@ -22,11 +22,7 @@ type WebsocketStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type Transmitter = SplitSink<WebsocketStream, Message>;
 pub type Receiver = SplitStream<WebsocketStream>;
 
-pub async fn request_channels(
-    tx: &mut Transmitter,
-    symbols: &Vec<String>,
-    depth: usize,
-) -> Result<()> {
+pub async fn request_channels(tx: &mut Transmitter, symbols: &[&str], depth: usize) -> Result<()> {
     let data = serde_json::json!({
         "method": "subscribe",
         "params": {
@@ -110,6 +106,7 @@ fn compute_checksum(bids: &[(i64, i64)], asks: &[(i64, i64)]) -> u32 {
 }
 
 pub struct SymbolState {
+    pub name: String, // TODO is it better to use &str here?
     pub order_book: OrderBook,
     pub precision: AssetPairPrecision,
     pub writer: Sender<WriterCommand>,
@@ -118,12 +115,14 @@ pub struct SymbolState {
 // TODO should have method to return order book snapshot
 impl SymbolState {
     pub fn new(
+        name: &str,
         order_book: OrderBook,
         precision: AssetPairPrecision,
         // store: Box<dyn OrderBookSink>,
         writer: Sender<WriterCommand>,
     ) -> SymbolState {
         SymbolState {
+            name: name.to_string(),
             order_book,
             precision,
             writer,

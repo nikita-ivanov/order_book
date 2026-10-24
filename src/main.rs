@@ -3,14 +3,14 @@ use clap::Parser;
 use kraken_l3::{
     kraken::feed::KrakenFeed,
     retry::{ExponentialRetryPolicy, NoRetryPolicy, RetryDecision, RetryPolicy, RetryPolicyKind},
-    store::{construct_file_stores, writer::BookWriter},
+    store::{construct_file_store, writer::BookWriter},
 };
 use tokio::time::sleep;
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(required = true, num_args = 1)]
-    symbols: Vec<String>,
+    symbol: String,
 
     #[arg(short, long, default_value_t = 10)]
     depth: usize,
@@ -28,10 +28,10 @@ async fn main() -> Result<()> {
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
-    let stores = construct_file_stores(&args.symbols, args.depth);
-    let book_writer = BookWriter::new(stores);
+    let store = construct_file_store(&args.symbol, args.depth);
+    let book_writer = BookWriter::new(store);
     let mut feed =
-        KrakenFeed::new(&args.symbols, args.depth as u16, true, book_writer.sender()).await?;
+        KrakenFeed::new(&args.symbol, args.depth as u16, true, book_writer.sender()).await?;
 
     loop {
         tokio::select! {

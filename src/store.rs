@@ -3,8 +3,6 @@ use anyhow::Result;
 mod parquet;
 pub mod writer;
 
-use std::collections::HashMap;
-
 use crate::{book::snapshot::OrderBookSnapshot, store::parquet::ParquetSink};
 
 pub trait OrderBookSink {
@@ -23,17 +21,6 @@ impl OrderBookSink for NoOpSink {
     }
 }
 
-pub fn construct_file_stores(
-    symbols: &Vec<String>,
-    depth: usize,
-) -> HashMap<String, Box<dyn OrderBookSink + Send>> {
-    let mut stores = HashMap::<String, Box<dyn OrderBookSink + Send>>::new();
-    for symbol in symbols {
-        stores.insert(
-            String::from(symbol),
-            Box::new(ParquetSink::new(symbol.to_string(), depth, None)),
-        );
-    }
-
-    stores
+pub fn construct_file_store(symbol: &str, depth: usize) -> Box<dyn OrderBookSink + Send> {
+    Box::new(ParquetSink::new(symbol.to_string(), depth, None))
 }
