@@ -7,33 +7,17 @@ use kraken_l3::{
 };
 use tokio::time::sleep;
 
-/// Order book streaming from Kraken WS (v2).
 #[derive(Parser, Debug)]
 struct Args {
-    /// Vector of pairs to collect order book for
     #[arg(required = true, num_args = 1)]
     symbols: Vec<String>,
 
-    /// Order book depth
     #[arg(short, long, default_value_t = 10)]
     depth: usize,
 
     #[arg(value_enum, short, long, default_value_t = RetryPolicyKind::Exponential)]
     retry_policy: RetryPolicyKind,
 }
-
-// #[tokio::main]
-// async fn main2() -> Result<()> {
-//     let path = Path::new("/Users/nivanov/ob_data/eth_usd.parquet");
-//     let file = OpenOptions::new().read(true).open(path).unwrap();
-//     let reader = ParquetRecordBatchReader::try_new(file, 1).unwrap();
-//
-//     for chunk in reader {
-//         println!("{chunk:?}");
-//     }
-//
-//     Ok(())
-// }
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -78,7 +62,13 @@ async fn main() -> Result<()> {
         };
     }
 
-    book_writer.shutdown();
-
-    Ok(())
+    match book_writer.shutdown() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            println!(
+                "Error during book writer shutdown. If hangs, kill the process. Error was:\n{e:?}"
+            );
+            Ok(())
+        }
+    }
 }
