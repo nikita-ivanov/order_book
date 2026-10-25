@@ -1,13 +1,12 @@
 use anyhow::{Result, anyhow};
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::ops::Index;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -63,13 +62,15 @@ impl BufferArray {
             let ask = asks[idx];
 
             self.bids
-                .get_mut(&level)
-                .expect("level should be there")
+                .entry(level)
+                .or_default()
+                // .expect(&format!("missing level {level} in bids"))
                 .push(bid);
 
             self.asks
-                .get_mut(&level)
-                .expect("level should be there")
+                .entry(level)
+                .or_default()
+                // .expect(&format!("missing level {level} in asks"))
                 .push(ask);
         }
 
@@ -160,6 +161,7 @@ impl ParquetSink {
 
 impl Drop for ParquetSink {
     fn drop(&mut self) {
+        println!("dropping parquet store");
         let _ = self.finish();
     }
 }
@@ -171,20 +173,19 @@ impl OrderBookSink for ParquetSink {
         if self.buffer.size >= self.buffer_size {
             let mut columns: Vec<ArrayRef> = Vec::new();
 
-            let recorded_array = self.buffer.recorded.drain(..).collect::<Vec<i64>>();
+            let recorded_array = std::mem::take(&mut self.buffer.recorded);
             columns.push(Arc::new(Int64Array::from(recorded_array)));
 
-            let published_array = self.buffer.published.drain(..).collect::<Vec<i64>>();
+            let published_array = std::mem::take(&mut self.buffer.published);
             columns.push(Arc::new(Int64Array::from(published_array)));
 
             for level in 1..ob.depth + 1 {
-                let bids: Vec<Option<(f64, f64)>> = self
-                    .buffer
-                    .bids
-                    .get_mut(&level)
-                    .expect("level should be there")
-                    .drain(..)
-                    .collect();
+                let bids: Vec<Option<(f64, f64)>> = std::mem::take(
+                    self.buffer
+                        .bids
+                        .get_mut(&level)
+                        .expect("level should be there"),
+                );
 
                 let bid_prices: Vec<Option<f64>> =
                     bids.iter().map(|opt| opt.map(|x| x.0)).collect();
@@ -195,13 +196,12 @@ impl OrderBookSink for ParquetSink {
                 columns.push(Arc::new(Float64Array::from(bid_prices)));
                 columns.push(Arc::new(Float64Array::from(bid_quantities)));
 
-                let asks: Vec<Option<(f64, f64)>> = self
-                    .buffer
-                    .asks
-                    .get_mut(&level)
-                    .expect("level should be there")
-                    .drain(..)
-                    .collect();
+                let asks: Vec<Option<(f64, f64)>> = std::mem::take(
+                    self.buffer
+                        .asks
+                        .get_mut(&level)
+                        .expect("level should be there"),
+                );
 
                 let ask_prices: Vec<Option<f64>> =
                     asks.iter().map(|opt| opt.map(|x| x.0)).collect();
@@ -215,10 +215,14 @@ impl OrderBookSink for ParquetSink {
 
             let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
 
-            match self.writer.as_mut() {
+            let res = match self.writer.as_mut() {
                 Some(writer) => Ok(writer.write(&record)?),
                 None => Err(anyhow!("writer already closed")),
             };
+
+            self.buffer.empty();
+
+            return res;
         }
 
         Ok(())
@@ -281,6 +285,7 @@ impl OrderBookSink for ParquetSink {
     }
 
     fn finish(&mut self) -> Result<()> {
+        println!("finishing parquet store");
         match self.writer.take() {
             Some(mut writer) => match writer.finish() {
                 Ok(_) => Ok(()),

@@ -26,7 +26,8 @@ impl BookWriter {
             loop {
                 let command = match receiver.recv() {
                     Ok(s) => s,
-                    Err(_) => {
+                    Err(e) => {
+                        println!("Recevied error, finishing store. Error was\n{e:?}");
                         store.finish()?;
                         break;
                     }
@@ -37,6 +38,7 @@ impl BookWriter {
                         store.write(&snapshot).unwrap();
                     }
                     WriterCommand::Finish => {
+                        println!("Recevied fisnih command, finishing store.");
                         store.finish()?;
                         break;
                     }
