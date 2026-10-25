@@ -1,11 +1,13 @@
 use anyhow::{Result, anyhow};
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
+use std::collections::HashMap;
 use std::fs;
 use std::fs::{File, OpenOptions};
+use std::ops::Index;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,10 +18,88 @@ use crate::store::OrderBookSink;
 pub struct ParquetSink {
     writer: Option<ArrowWriter<File>>,
     schema: Arc<Schema>,
+    buffer_size: usize,
+    buffer: BufferArray,
+}
+
+#[derive(Debug)]
+struct BufferArray {
+    bids: HashMap<u16, Vec<Option<(f64, f64)>>>,
+    asks: HashMap<u16, Vec<Option<(f64, f64)>>>,
+    published: Vec<i64>,
+    recorded: Vec<i64>,
+    size: usize,
+}
+
+impl BufferArray {
+    fn new() -> BufferArray {
+        BufferArray {
+            bids: HashMap::new(),
+            asks: HashMap::new(),
+            published: Vec::new(),
+            recorded: Vec::new(),
+            size: 0,
+        }
+    }
+    fn apply(&mut self, ob: &OrderBookSnapshot) {
+        let mut bids: Vec<Option<(f64, f64)>> =
+            ob.get_bids().iter().map(|pair| Some(*pair)).collect();
+
+        let mut asks: Vec<Option<(f64, f64)>> =
+            ob.get_asks().iter().map(|pair| Some(*pair)).collect();
+
+        // handle potential cases when bids and asks in order book have different lengths
+        while bids.len() < ob.depth as usize {
+            bids.push(None);
+        }
+
+        while asks.len() < ob.depth as usize {
+            asks.push(None);
+        }
+
+        for level in 1..ob.depth + 1 {
+            let idx = (level - 1) as usize;
+            let bid = bids[idx];
+            let ask = asks[idx];
+
+            self.bids
+                .get_mut(&level)
+                .expect("level should be there")
+                .push(bid);
+
+            self.asks
+                .get_mut(&level)
+                .expect("level should be there")
+                .push(ask);
+        }
+
+        self.published.push(
+            ob.timestamp
+                .timestamp_nanos_opt()
+                .expect("invalid datetime"),
+        );
+
+        self.recorded
+            .push(Utc::now().timestamp_nanos_opt().expect("invalid datetime"));
+
+        self.size += 1;
+    }
+
+    fn empty(&mut self) {
+        self.bids = HashMap::new();
+        self.asks = HashMap::new();
+        self.published = Vec::new();
+        self.recorded = Vec::new();
+    }
 }
 
 impl ParquetSink {
-    pub fn new(symbol: String, depth: usize, file_path: Option<PathBuf>) -> ParquetSink {
+    pub fn new(
+        symbol: String,
+        depth: usize,
+        buffer_size: usize,
+        file_path: Option<PathBuf>,
+    ) -> ParquetSink {
         let file_path = match file_path {
             Some(path) => {
                 if Path::exists(&path) {
@@ -72,6 +152,8 @@ impl ParquetSink {
         ParquetSink {
             writer: Some(writer),
             schema,
+            buffer_size,
+            buffer: BufferArray::new(),
         }
     }
 }
@@ -84,65 +166,118 @@ impl Drop for ParquetSink {
 
 impl OrderBookSink for ParquetSink {
     fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()> {
-        let now = Utc::now()
-            .timestamp_nanos_opt()
-            .expect("timestamp should be available");
+        self.buffer.apply(ob);
 
-        let timestamp = Int64Array::from(vec![now]);
-        let published = Int64Array::from(vec![ob.timestamp.timestamp_nanos_opt()]);
+        if self.buffer.size >= self.buffer_size {
+            let mut columns: Vec<ArrayRef> = Vec::new();
 
-        let mut columns: Vec<ArrayRef> = vec![Arc::new(timestamp), Arc::new(published)];
+            let recorded_array = self.buffer.recorded.drain(..).collect::<Vec<i64>>();
+            columns.push(Arc::new(Int64Array::from(recorded_array)));
 
-        let mut i = 0;
-        for (p, q) in ob.get_bids().iter() {
-            let price_col = Float64Array::from(vec![*p]);
-            columns.push(Arc::new(price_col));
+            let published_array = self.buffer.published.drain(..).collect::<Vec<i64>>();
+            columns.push(Arc::new(Int64Array::from(published_array)));
 
-            let quantity_col = Float64Array::from(vec![*q]);
-            columns.push(Arc::new(quantity_col));
+            for level in 1..ob.depth + 1 {
+                let bids: Vec<Option<(f64, f64)>> = self
+                    .buffer
+                    .bids
+                    .get_mut(&level)
+                    .expect("level should be there")
+                    .drain(..)
+                    .collect();
 
-            i += 1;
-        }
+                let bid_prices: Vec<Option<f64>> =
+                    bids.iter().map(|opt| opt.map(|x| x.0)).collect();
 
-        // pad to make sure we guarantee number of cols
-        if i < ob.depth {
-            for _ in i..ob.depth {
-                let price_col = Float64Array::from(vec![0.0]);
-                columns.push(Arc::new(price_col));
+                let bid_quantities: Vec<Option<f64>> =
+                    bids.iter().map(|opt| opt.map(|x| x.1)).collect();
 
-                let quantity_col = Float64Array::from(vec![0.0]);
-                columns.push(Arc::new(quantity_col));
+                columns.push(Arc::new(Float64Array::from(bid_prices)));
+                columns.push(Arc::new(Float64Array::from(bid_quantities)));
+
+                let asks: Vec<Option<(f64, f64)>> = self
+                    .buffer
+                    .asks
+                    .get_mut(&level)
+                    .expect("level should be there")
+                    .drain(..)
+                    .collect();
+
+                let ask_prices: Vec<Option<f64>> =
+                    asks.iter().map(|opt| opt.map(|x| x.0)).collect();
+
+                let ask_quantities: Vec<Option<f64>> =
+                    asks.iter().map(|opt| opt.map(|x| x.1)).collect();
+
+                columns.push(Arc::new(Float64Array::from(ask_prices)));
+                columns.push(Arc::new(Float64Array::from(ask_quantities)));
             }
+
+            let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
+
+            match self.writer.as_mut() {
+                Some(writer) => Ok(writer.write(&record)?),
+                None => Err(anyhow!("writer already closed")),
+            };
         }
 
-        let mut i = 0;
-        for (p, q) in ob.get_asks().iter() {
-            let price_col = Float64Array::from(vec![*p]);
-            columns.push(Arc::new(price_col));
+        Ok(())
 
-            let quantity_col = Float64Array::from(vec![*q]);
-            columns.push(Arc::new(quantity_col));
-
-            i += 1;
-        }
-
-        // pad to make sure we guarantee number of cols
-        if i < ob.depth {
-            for _ in i..ob.depth {
-                let price_col = Float64Array::from(vec![0.0]);
-                columns.push(Arc::new(price_col));
-
-                let quantity_col = Float64Array::from(vec![0.0]);
-                columns.push(Arc::new(quantity_col));
-            }
-        }
-
-        let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
-
-        match self.writer.as_mut() {
-            Some(writer) => Ok(writer.write(&record)?),
-            None => Err(anyhow!("writer already closed")),
-        }
+        // let timestamp = Int64Array::from(vec![now]);
+        // let published = Int64Array::from(vec![ob.timestamp.timestamp_nanos_opt()]);
+        //
+        // let mut columns: Vec<ArrayRef> = vec![Arc::new(timestamp), Arc::new(published)];
+        //
+        // let mut i = 0;
+        // for (p, q) in ob.get_bids().iter() {
+        //     let price_col = Float64Array::from(vec![*p]);
+        //     columns.push(Arc::new(price_col));
+        //
+        //     let quantity_col = Float64Array::from(vec![*q]);
+        //     columns.push(Arc::new(quantity_col));
+        //
+        //     i += 1;
+        // }
+        //
+        // // pad to make sure we guarantee number of cols
+        // if i < ob.depth {
+        //     for _ in i..ob.depth {
+        //         let price_col = Float64Array::from(vec![0.0]);
+        //         columns.push(Arc::new(price_col));
+        //
+        //         let quantity_col = Float64Array::from(vec![0.0]);
+        //         columns.push(Arc::new(quantity_col));
+        //     }
+        // }
+        //
+        // let mut i = 0;
+        // for (p, q) in ob.get_asks().iter() {
+        //     let price_col = Float64Array::from(vec![*p]);
+        //     columns.push(Arc::new(price_col));
+        //
+        //     let quantity_col = Float64Array::from(vec![*q]);
+        //     columns.push(Arc::new(quantity_col));
+        //
+        //     i += 1;
+        // }
+        //
+        // // pad to make sure we guarantee number of cols
+        // if i < ob.depth {
+        //     for _ in i..ob.depth {
+        //         let price_col = Float64Array::from(vec![0.0]);
+        //         columns.push(Arc::new(price_col));
+        //
+        //         let quantity_col = Float64Array::from(vec![0.0]);
+        //         columns.push(Arc::new(quantity_col));
+        //     }
+        // }
+        //
+        // let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
+        //
+        // match self.writer.as_mut() {
+        //     Some(writer) => Ok(writer.write(&record)?),
+        //     None => Err(anyhow!("writer already closed")),
+        // }
     }
 
     fn finish(&mut self) -> Result<()> {
