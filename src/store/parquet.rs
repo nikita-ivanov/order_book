@@ -18,6 +18,7 @@ pub struct ParquetSink {
     writer: Option<ArrowWriter<File>>,
     schema: Arc<Schema>,
     buffer_size: usize,
+    depth: usize,
     buffer: BufferArray,
 }
 
@@ -31,15 +32,24 @@ struct BufferArray {
 }
 
 impl BufferArray {
-    fn new() -> BufferArray {
+    fn new(depth: usize) -> BufferArray {
+        let mut bids: HashMap<u16, Vec<Option<(f64, f64)>>> = HashMap::new();
+        let mut asks: HashMap<u16, Vec<Option<(f64, f64)>>> = HashMap::new();
+
+        for level in 1..depth + 1 {
+            bids.insert(level as u16, Vec::new());
+            asks.insert(level as u16, Vec::new());
+        }
+
         BufferArray {
-            bids: HashMap::new(),
-            asks: HashMap::new(),
+            bids,
+            asks,
             published: Vec::new(),
             recorded: Vec::new(),
             size: 0,
         }
     }
+
     fn apply(&mut self, ob: &OrderBookSnapshot) {
         let mut bids: Vec<Option<(f64, f64)>> =
             ob.get_bids().iter().map(|pair| Some(*pair)).collect();
@@ -62,15 +72,13 @@ impl BufferArray {
             let ask = asks[idx];
 
             self.bids
-                .entry(level)
-                .or_default()
-                // .expect(&format!("missing level {level} in bids"))
+                .get_mut(&level)
+                .expect(&format!("missing level {level} in bids"))
                 .push(bid);
 
             self.asks
-                .entry(level)
-                .or_default()
-                // .expect(&format!("missing level {level} in asks"))
+                .get_mut(&level)
+                .expect(&format!("missing level {level} in asks"))
                 .push(ask);
         }
 
@@ -87,8 +95,14 @@ impl BufferArray {
     }
 
     fn empty(&mut self) {
-        self.bids = HashMap::new();
-        self.asks = HashMap::new();
+        for v in self.bids.values_mut() {
+            v.clear();
+        }
+
+        for v in self.asks.values_mut() {
+            v.clear();
+        }
+
         self.published = Vec::new();
         self.recorded = Vec::new();
     }
@@ -154,8 +168,65 @@ impl ParquetSink {
             writer: Some(writer),
             schema,
             buffer_size,
-            buffer: BufferArray::new(),
+            depth,
+            buffer: BufferArray::new(depth),
         }
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        println!("Flushing ParquetSink");
+        let mut columns: Vec<ArrayRef> = Vec::new();
+
+        let recorded_array = std::mem::take(&mut self.buffer.recorded);
+        columns.push(Arc::new(Int64Array::from(recorded_array)));
+
+        let published_array = std::mem::take(&mut self.buffer.published);
+        columns.push(Arc::new(Int64Array::from(published_array)));
+
+        for level in 1..self.depth + 1 {
+            let bids: Vec<Option<(f64, f64)>> = std::mem::take(
+                self.buffer
+                    .bids
+                    .get_mut(&(level as u16))
+                    .expect("level should be there"),
+            );
+
+            let bid_prices: Vec<Option<f64>> = bids.iter().map(|opt| opt.map(|x| x.0)).collect();
+
+            let bid_quantities: Vec<Option<f64>> =
+                bids.iter().map(|opt| opt.map(|x| x.1)).collect();
+
+            columns.push(Arc::new(Float64Array::from(bid_prices)));
+            columns.push(Arc::new(Float64Array::from(bid_quantities)));
+        }
+
+        for level in 1..self.depth + 1 {
+            let asks: Vec<Option<(f64, f64)>> = std::mem::take(
+                self.buffer
+                    .asks
+                    .get_mut(&(level as u16))
+                    .expect("level should be there"),
+            );
+
+            let ask_prices: Vec<Option<f64>> = asks.iter().map(|opt| opt.map(|x| x.0)).collect();
+
+            let ask_quantities: Vec<Option<f64>> =
+                asks.iter().map(|opt| opt.map(|x| x.1)).collect();
+
+            columns.push(Arc::new(Float64Array::from(ask_prices)));
+            columns.push(Arc::new(Float64Array::from(ask_quantities)));
+        }
+
+        let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
+
+        let res = match self.writer.as_mut() {
+            Some(writer) => Ok(writer.write(&record)?),
+            None => Err(anyhow!("writer already closed")),
+        };
+
+        self.buffer.empty();
+
+        res
     }
 }
 
@@ -171,121 +242,17 @@ impl OrderBookSink for ParquetSink {
         self.buffer.apply(ob);
 
         if self.buffer.size >= self.buffer_size {
-            let mut columns: Vec<ArrayRef> = Vec::new();
-
-            let recorded_array = std::mem::take(&mut self.buffer.recorded);
-            columns.push(Arc::new(Int64Array::from(recorded_array)));
-
-            let published_array = std::mem::take(&mut self.buffer.published);
-            columns.push(Arc::new(Int64Array::from(published_array)));
-
-            for level in 1..ob.depth + 1 {
-                let bids: Vec<Option<(f64, f64)>> = std::mem::take(
-                    self.buffer
-                        .bids
-                        .get_mut(&level)
-                        .expect("level should be there"),
-                );
-
-                let bid_prices: Vec<Option<f64>> =
-                    bids.iter().map(|opt| opt.map(|x| x.0)).collect();
-
-                let bid_quantities: Vec<Option<f64>> =
-                    bids.iter().map(|opt| opt.map(|x| x.1)).collect();
-
-                columns.push(Arc::new(Float64Array::from(bid_prices)));
-                columns.push(Arc::new(Float64Array::from(bid_quantities)));
-
-                let asks: Vec<Option<(f64, f64)>> = std::mem::take(
-                    self.buffer
-                        .asks
-                        .get_mut(&level)
-                        .expect("level should be there"),
-                );
-
-                let ask_prices: Vec<Option<f64>> =
-                    asks.iter().map(|opt| opt.map(|x| x.0)).collect();
-
-                let ask_quantities: Vec<Option<f64>> =
-                    asks.iter().map(|opt| opt.map(|x| x.1)).collect();
-
-                columns.push(Arc::new(Float64Array::from(ask_prices)));
-                columns.push(Arc::new(Float64Array::from(ask_quantities)));
-            }
-
-            let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
-
-            let res = match self.writer.as_mut() {
-                Some(writer) => Ok(writer.write(&record)?),
-                None => Err(anyhow!("writer already closed")),
-            };
-
-            self.buffer.empty();
-
-            return res;
+            println!("buffer size limit reached, flushing...");
+            self.flush()?;
         }
 
         Ok(())
-
-        // let timestamp = Int64Array::from(vec![now]);
-        // let published = Int64Array::from(vec![ob.timestamp.timestamp_nanos_opt()]);
-        //
-        // let mut columns: Vec<ArrayRef> = vec![Arc::new(timestamp), Arc::new(published)];
-        //
-        // let mut i = 0;
-        // for (p, q) in ob.get_bids().iter() {
-        //     let price_col = Float64Array::from(vec![*p]);
-        //     columns.push(Arc::new(price_col));
-        //
-        //     let quantity_col = Float64Array::from(vec![*q]);
-        //     columns.push(Arc::new(quantity_col));
-        //
-        //     i += 1;
-        // }
-        //
-        // // pad to make sure we guarantee number of cols
-        // if i < ob.depth {
-        //     for _ in i..ob.depth {
-        //         let price_col = Float64Array::from(vec![0.0]);
-        //         columns.push(Arc::new(price_col));
-        //
-        //         let quantity_col = Float64Array::from(vec![0.0]);
-        //         columns.push(Arc::new(quantity_col));
-        //     }
-        // }
-        //
-        // let mut i = 0;
-        // for (p, q) in ob.get_asks().iter() {
-        //     let price_col = Float64Array::from(vec![*p]);
-        //     columns.push(Arc::new(price_col));
-        //
-        //     let quantity_col = Float64Array::from(vec![*q]);
-        //     columns.push(Arc::new(quantity_col));
-        //
-        //     i += 1;
-        // }
-        //
-        // // pad to make sure we guarantee number of cols
-        // if i < ob.depth {
-        //     for _ in i..ob.depth {
-        //         let price_col = Float64Array::from(vec![0.0]);
-        //         columns.push(Arc::new(price_col));
-        //
-        //         let quantity_col = Float64Array::from(vec![0.0]);
-        //         columns.push(Arc::new(quantity_col));
-        //     }
-        // }
-        //
-        // let record = RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap();
-        //
-        // match self.writer.as_mut() {
-        //     Some(writer) => Ok(writer.write(&record)?),
-        //     None => Err(anyhow!("writer already closed")),
-        // }
     }
 
     fn finish(&mut self) -> Result<()> {
         println!("finishing parquet store");
+        self.flush()?;
+
         match self.writer.take() {
             Some(mut writer) => match writer.finish() {
                 Ok(_) => Ok(()),
@@ -313,19 +280,19 @@ mod tests {
     fn test_parquet_store() {
         let depth = 3;
         let path = tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
-        let mut store = ParquetSink::new("ETH/USD".to_string(), depth, Some(path.clone()));
+        let mut store = ParquetSink::new("ETH/USD".to_string(), depth, 5, Some(path.clone()));
 
         let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0, Utc::now());
 
         ob.apply_update(BookUpdate {
             bids: Some(vec![
                 Level {
-                    price: 12,
-                    quantity: 7,
-                },
-                Level {
                     price: 13,
                     quantity: 1,
+                },
+                Level {
+                    price: 12,
+                    quantity: 7,
                 },
                 Level {
                     price: 15,
@@ -335,7 +302,7 @@ mod tests {
 
             asks: Some(vec![
                 Level {
-                    price: 15,
+                    price: 18,
                     quantity: 7,
                 },
                 Level {
@@ -343,7 +310,7 @@ mod tests {
                     quantity: 1,
                 },
                 Level {
-                    price: 20,
+                    price: 23,
                     quantity: 3,
                 },
             ]),
@@ -353,7 +320,8 @@ mod tests {
 
         let now = Utc::now().timestamp_nanos_opt().unwrap();
 
-        store.write(&ob.get_snapshot()).unwrap();
+        let snapshot = ob.get_snapshot();
+        store.write(&snapshot).unwrap();
         store.finish().unwrap();
 
         let file = File::open(&path).unwrap();
@@ -431,8 +399,6 @@ mod tests {
             .downcast_ref::<Int64Array>()
             .unwrap()
             .value(0);
-
-        dbg!(published_ns);
 
         assert!(published_ns >= now - 1000 * 1000);
         assert!(published_ns < now + 1000 * 1000);
