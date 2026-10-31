@@ -24,29 +24,30 @@ pub struct ParquetSink {
 
 #[derive(Debug)]
 struct BufferArray {
+    // TODO: could be vec of vec to avoid hashing
     bids: HashMap<u16, Vec<Option<(f64, f64)>>>,
     asks: HashMap<u16, Vec<Option<(f64, f64)>>>,
     published: Vec<i64>,
     recorded: Vec<i64>,
-    size: usize,
+    current_size: usize,
 }
 
 impl BufferArray {
-    fn new(depth: usize) -> BufferArray {
+    fn new(depth: usize, buffer_limit: usize) -> BufferArray {
         let mut bids: HashMap<u16, Vec<Option<(f64, f64)>>> = HashMap::new();
         let mut asks: HashMap<u16, Vec<Option<(f64, f64)>>> = HashMap::new();
 
         for level in 1..depth + 1 {
-            bids.insert(level as u16, Vec::new());
-            asks.insert(level as u16, Vec::new());
+            bids.insert(level as u16, Vec::with_capacity(buffer_limit));
+            asks.insert(level as u16, Vec::with_capacity(buffer_limit));
         }
 
         BufferArray {
             bids,
             asks,
-            published: Vec::new(),
-            recorded: Vec::new(),
-            size: 0,
+            published: Vec::with_capacity(buffer_limit),
+            recorded: Vec::with_capacity(buffer_limit),
+            current_size: 0,
         }
     }
 
@@ -91,7 +92,7 @@ impl BufferArray {
         self.recorded
             .push(Utc::now().timestamp_nanos_opt().expect("invalid datetime"));
 
-        self.size += 1;
+        self.current_size += 1;
     }
 
     fn empty(&mut self) {
@@ -103,8 +104,10 @@ impl BufferArray {
             v.clear();
         }
 
-        self.published = Vec::new();
-        self.recorded = Vec::new();
+        self.published.clear();
+        self.recorded.clear();
+
+        self.current_size = 0;
     }
 }
 
@@ -169,7 +172,7 @@ impl ParquetSink {
             schema,
             buffer_size,
             depth,
-            buffer: BufferArray::new(depth),
+            buffer: BufferArray::new(depth, buffer_size),
         }
     }
 
@@ -177,18 +180,25 @@ impl ParquetSink {
         println!("Flushing ParquetSink");
         let mut columns: Vec<ArrayRef> = Vec::new();
 
-        let recorded_array = std::mem::take(&mut self.buffer.recorded);
+        let recorded_array = std::mem::replace(
+            &mut self.buffer.recorded,
+            Vec::with_capacity(self.buffer_size),
+        );
         columns.push(Arc::new(Int64Array::from(recorded_array)));
 
-        let published_array = std::mem::take(&mut self.buffer.published);
+        let published_array = std::mem::replace(
+            &mut self.buffer.published,
+            Vec::with_capacity(self.buffer_size),
+        );
         columns.push(Arc::new(Int64Array::from(published_array)));
 
         for level in 1..self.depth + 1 {
-            let bids: Vec<Option<(f64, f64)>> = std::mem::take(
+            let bids: Vec<Option<(f64, f64)>> = std::mem::replace(
                 self.buffer
                     .bids
                     .get_mut(&(level as u16))
                     .expect("level should be there"),
+                Vec::with_capacity(self.buffer_size),
             );
 
             let bid_prices: Vec<Option<f64>> = bids.iter().map(|opt| opt.map(|x| x.0)).collect();
@@ -201,11 +211,12 @@ impl ParquetSink {
         }
 
         for level in 1..self.depth + 1 {
-            let asks: Vec<Option<(f64, f64)>> = std::mem::take(
+            let asks: Vec<Option<(f64, f64)>> = std::mem::replace(
                 self.buffer
                     .asks
                     .get_mut(&(level as u16))
                     .expect("level should be there"),
+                Vec::with_capacity(self.buffer_size),
             );
 
             let ask_prices: Vec<Option<f64>> = asks.iter().map(|opt| opt.map(|x| x.0)).collect();
@@ -241,7 +252,7 @@ impl OrderBookSink for ParquetSink {
     fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()> {
         self.buffer.apply(ob);
 
-        if self.buffer.size >= self.buffer_size {
+        if self.buffer.current_size >= self.buffer_size {
             println!("buffer size limit reached, flushing...");
             self.flush()?;
         }

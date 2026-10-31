@@ -22,5 +22,5 @@ impl OrderBookSink for NoOpSink {
 }
 
 pub fn construct_file_store(symbol: &str, depth: usize) -> Box<dyn OrderBookSink + Send> {
-    Box::new(ParquetSink::new(symbol.to_string(), depth, 1000, None))
+    Box::new(ParquetSink::new(symbol.to_string(), depth, 20, None))
 }
