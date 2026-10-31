@@ -130,7 +130,9 @@ impl ParquetSink {
                 let file_name = uuid::Uuid::new_v4().to_string();
                 dirs::home_dir()
                     .expect("Could not infer home directory")
-                    .join(format!("ob_data/{symbol_slug}/{file_name}.parquet"))
+                    .join(format!(
+                        "ob_data/symbol={symbol_slug}/depth={depth}/{file_name}.parquet"
+                    ))
             }
         };
 
