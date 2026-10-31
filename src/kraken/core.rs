@@ -154,7 +154,7 @@ impl SymbolState {
         };
 
         self.order_book
-            .apply_update(book_update)
+            .apply_update(&book_update)
             .map_err(|e| KrakenFeedError::OrderBookError { source: e })?;
 
         if verify_checksum {

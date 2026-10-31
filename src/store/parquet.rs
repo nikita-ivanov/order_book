@@ -289,15 +289,8 @@ mod tests {
         store::{OrderBookSink, parquet::ParquetSink},
     };
 
-    #[test]
-    fn test_parquet_store() {
-        let depth = 3;
-        let path = tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
-        let mut store = ParquetSink::new("ETH/USD".to_string(), depth, 5, Some(path.clone()));
-
-        let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0, Utc::now());
-
-        ob.apply_update(BookUpdate {
+    fn get_book_updates() -> [BookUpdate; 2] {
+        let update1 = BookUpdate {
             bids: Some(vec![
                 Level {
                     price: 13,
@@ -328,13 +321,61 @@ mod tests {
                 },
             ]),
             timestamp: Utc::now(),
-        })
-        .unwrap();
+        };
+
+        let update2 = BookUpdate {
+            bids: Some(vec![
+                Level {
+                    price: 14,
+                    quantity: 2,
+                },
+                Level {
+                    price: 15,
+                    quantity: 6,
+                },
+                Level {
+                    price: 16,
+                    quantity: 4,
+                },
+            ]),
+
+            asks: Some(vec![
+                Level {
+                    price: 17,
+                    quantity: 3,
+                },
+                Level {
+                    price: 18,
+                    quantity: 9,
+                },
+                Level {
+                    price: 20,
+                    quantity: 8,
+                },
+            ]),
+            timestamp: Utc::now(),
+        };
+
+        [update1, update2]
+    }
+
+    #[test]
+    fn test_parquet_store() {
+        let depth = 3;
+        let path = tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
+        let mut store = ParquetSink::new("ETH/USD".to_string(), depth, 5, Some(path.clone()));
 
         let now = Utc::now().timestamp_nanos_opt().unwrap();
 
-        let snapshot = ob.get_snapshot();
-        store.write(&snapshot).unwrap();
+        let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0, Utc::now());
+        let updates = get_book_updates();
+
+        ob.apply_update(&updates[0]).unwrap();
+        store.write(&ob.get_snapshot()).unwrap();
+
+        ob.apply_update(&updates[1]).unwrap();
+        store.write(&ob.get_snapshot()).unwrap();
+
         store.finish().unwrap();
 
         let file = File::open(&path).unwrap();
@@ -347,7 +388,7 @@ mod tests {
 
         // depth * 4 + 2
         assert_eq!(value.num_columns(), 14);
-        assert_eq!(value.num_rows(), 1);
+        assert_eq!(value.num_rows(), 2);
 
         assert_eq!(
             value
@@ -392,6 +433,59 @@ mod tests {
                 .value(0),
             1.0
         );
+
+        // check that prices are sorted
+        let mut bids_0 = Vec::new();
+        let mut bids_1 = Vec::new();
+        let mut asks_0 = Vec::new();
+        let mut asks_1 = Vec::new();
+
+        for level in 1..=depth {
+            let bid_name = format!("bid_p_{level}");
+            let ask_name = format!("ask_p_{level}");
+            bids_0.push(
+                value
+                    .column_by_name(&bid_name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap()
+                    .value(0),
+            );
+            bids_1.push(
+                value
+                    .column_by_name(&bid_name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap()
+                    .value(1),
+            );
+
+            asks_0.push(
+                value
+                    .column_by_name(&ask_name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap()
+                    .value(0),
+            );
+            asks_1.push(
+                value
+                    .column_by_name(&ask_name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap()
+                    .value(1),
+            );
+        }
+
+        assert!(bids_0.iter().rev().is_sorted());
+        assert!(bids_1.iter().rev().is_sorted());
+        assert!(asks_0.is_sorted());
+        assert!(asks_1.is_sorted());
 
         // check that inserted_ns is within reasonable range from now (1 second)
         let inserted_ns = value

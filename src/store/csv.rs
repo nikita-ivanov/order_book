@@ -138,7 +138,7 @@ mod tests {
 
         let mut ob = OrderBook::new("dummy".to_string(), depth as u16, 0, 0, Utc::now());
 
-        ob.apply_update(BookUpdate {
+        ob.apply_update(&BookUpdate {
             bids: Some(vec![
                 Level {
                     price: 12,
@@ -189,7 +189,7 @@ mod tests {
                 .to_string()
         );
 
-        ob.apply_update(BookUpdate {
+        ob.apply_update(&BookUpdate {
             bids: Some(vec![
                 Level {
                     price: 17,

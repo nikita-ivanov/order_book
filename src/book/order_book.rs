@@ -49,8 +49,8 @@ impl OrderBook {
         }
     }
 
-    pub fn apply_update(&mut self, update: BookUpdate) -> Result<(), OrderBookError> {
-        if let Some(bids) = update.bids {
+    pub fn apply_update(&mut self, update: &BookUpdate) -> Result<(), OrderBookError> {
+        if let Some(bids) = &update.bids {
             for bid in bids {
                 match bid.quantity {
                     0 => self.bids.remove(&bid.price),
@@ -59,7 +59,7 @@ impl OrderBook {
             }
         }
 
-        if let Some(asks) = update.asks {
+        if let Some(asks) = &update.asks {
             for ask in asks {
                 match ask.quantity {
                     0 => self.asks.remove(&ask.price),
@@ -134,13 +134,13 @@ mod tests {
         let mut book = OrderBook::new(book_name(), 10, 2, 8, Utc::now());
 
         let update = get_update(10, 100, 42);
-        book.apply_update(update).unwrap();
+        book.apply_update(&update).unwrap();
         assert_eq!(book.bids.len(), 10);
         assert_eq!(book.asks.len(), 10);
 
         // increase price level to expand the book
         let update = get_update(1, 200, 42);
-        book.apply_update(update).unwrap();
+        book.apply_update(&update).unwrap();
         assert_eq!(book.bids.len(), 10);
         assert_eq!(book.asks.len(), 10);
     }
@@ -150,10 +150,10 @@ mod tests {
         let mut book = OrderBook::new(book_name(), 10, 2, 8, Utc::now());
 
         let update = get_update(2, 100, 42);
-        book.apply_update(update).unwrap();
+        book.apply_update(&update).unwrap();
 
         let update = get_update(2, 100, 42);
-        book.apply_update(update).unwrap();
+        book.apply_update(&update).unwrap();
 
         let expected_qty = 42;
 
@@ -170,10 +170,10 @@ mod tests {
         let mut book = OrderBook::new(book_name(), 10, 2, 8, Utc::now());
 
         let update = get_update(1, 100, 42);
-        book.apply_update(update).unwrap();
+        book.apply_update(&update).unwrap();
 
         let update = get_update(1, 105, 422);
-        book.apply_update(update).unwrap();
+        book.apply_update(&update).unwrap();
 
         assert_eq!(book.bids.get(&100).unwrap(), &42);
         assert_eq!(book.bids.get(&105).unwrap(), &422);
@@ -186,7 +186,7 @@ mod tests {
         let mut book = OrderBook::new("dummy".to_string(), 10, 0, 0, Utc::now());
 
         // basic one level test
-        book.apply_update(get_update(1, 100, 40)).unwrap();
+        book.apply_update(&get_update(1, 100, 40)).unwrap();
 
         let top = book.get_snapshot().top_of_book().unwrap();
 
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(top.ask_price, expected.ask_price);
         assert_eq!(top.ask_qty, expected.ask_qty);
 
-        book.apply_update(get_update(1, 101, 41)).unwrap();
+        book.apply_update(&get_update(1, 101, 41)).unwrap();
         let top = book.get_snapshot().top_of_book().unwrap();
 
         // bids: (100, 40), (101, 41)
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(top.ask_price, expected.ask_price);
         assert_eq!(top.ask_qty, expected.ask_qty);
 
-        book.apply_update(get_update(1, 99, 42)).unwrap();
+        book.apply_update(&get_update(1, 99, 42)).unwrap();
         let top = book.get_snapshot().top_of_book().unwrap();
 
         // bids: (100, 40), (101, 41), (99, 42)
@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(top.ask_price, expected.ask_price);
         assert_eq!(top.ask_qty, expected.ask_qty);
 
-        book.apply_update(BookUpdate {
+        book.apply_update(&BookUpdate {
             bids: Some(vec![
                 Level {
                     price: 101,
@@ -282,7 +282,7 @@ mod tests {
             panic!("top of book should error because of empty book");
         };
 
-        book.apply_update(BookUpdate {
+        book.apply_update(&BookUpdate {
             bids: Some(vec![Level {
                 price: 24,
                 quantity: 42,
@@ -297,7 +297,7 @@ mod tests {
         };
 
         // remove prev bid level
-        book.apply_update(BookUpdate {
+        book.apply_update(&BookUpdate {
             bids: Some(vec![Level {
                 price: 24,
                 quantity: 0,
