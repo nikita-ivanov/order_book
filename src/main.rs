@@ -3,7 +3,7 @@ use clap::Parser;
 use kraken_l3::{
     kraken::feed::KrakenFeed,
     retry::{ExponentialRetryPolicy, NoRetryPolicy, RetryDecision, RetryPolicy, RetryPolicyKind},
-    store::{construct_file_store, writer::BookWriter},
+    store::{OrderBookStoreKind, construct_file_store, writer::BookWriter},
 };
 use tokio::time::sleep;
 
@@ -14,6 +14,9 @@ struct Args {
 
     #[arg(short, long, default_value_t = 10)]
     depth: usize,
+
+    #[arg(short, long, default_value_t = OrderBookStoreKind::ParquetLong)]
+    store: OrderBookStoreKind,
 
     #[arg(value_enum, short, long, default_value_t = RetryPolicyKind::Exponential)]
     retry_policy: RetryPolicyKind,
@@ -28,7 +31,7 @@ async fn main() -> Result<()> {
         RetryPolicyKind::NoRetry => Box::new(NoRetryPolicy {}),
     };
 
-    let store = construct_file_store(&args.symbol, args.depth);
+    let store = construct_file_store(&args.symbol, args.depth, args.store);
     let book_writer = BookWriter::new(store);
     let mut feed =
         KrakenFeed::new(&args.symbol, args.depth as u16, true, book_writer.sender()).await?;

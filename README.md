@@ -26,15 +26,20 @@ Define order book depth (allowed values 10, 25, 100)
 cargo r SOL/USD --depth 25
 ```
 
+Configure order book store
+```
+cargo r BTC/USD -s parquet-wide
+```
+Defaults to `parquet-long`.
+
 Specify retry policy
 ```
 cargo r ETH/USD --retry-policy no-retry
 ```
 
 ## TODOs
-- DuckDbSink?
-- support choosing order book layout for storage - wide (current) vs long
-- buffer parquet writes instead of allocating `Vec` on every snapshot - done
+- support choosing order book layout for storage - wide (current) vs long - **done**
+- buffer parquet writes instead of allocating `Vec` on every snapshot - **done**
 - think how to propagate errors from sink thread; add failing sink test
 - replay fixture test; record real order book stream to jsonl, replay in a test and assert final state and written files
 - property based testing (`proptest` crate), e.g. bids/asks order, ob depth, quantities never negative

@@ -114,7 +114,7 @@ impl BufferArray {
 // TODO: make fields nullable where we may inserts nulls (bids and asks)
 impl ParquetWideSink {
     pub fn new(
-        symbol: String,
+        symbol: &str,
         depth: usize,
         buffer_size: usize,
         file_path: Option<PathBuf>,
@@ -132,7 +132,7 @@ impl ParquetWideSink {
                 dirs::home_dir()
                     .expect("Could not infer home directory")
                     .join(format!(
-                        "ob_data/symbol={symbol_slug}/depth={depth}/{file_name}.parquet"
+                        "ob_data/format=wide/symbol={symbol_slug}/depth={depth}/{file_name}.parquet"
                     ))
             }
         };

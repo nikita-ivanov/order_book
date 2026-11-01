@@ -1,5 +1,6 @@
 mod csv;
 use anyhow::Result;
+use clap::ValueEnum;
 mod parquet;
 mod parquet_long;
 pub mod writer;
@@ -25,7 +26,33 @@ impl OrderBookSink for NoOpSink {
     }
 }
 
-pub fn construct_file_store(symbol: &str, depth: usize) -> Box<dyn OrderBookSink + Send> {
-    // Box::new(ParquetSink::new(symbol.to_string(), depth, 20, None))
-    Box::new(ParquetLongSink::new(symbol.to_string(), 1000, None))
+#[derive(Debug, Clone, ValueEnum)]
+pub enum OrderBookStoreKind {
+    NoOps,
+    ParquetWide,
+    ParquetLong,
+}
+
+impl ToString for OrderBookStoreKind {
+    fn to_string(&self) -> String {
+        match self {
+            OrderBookStoreKind::NoOps => "no-ops".to_string(),
+            OrderBookStoreKind::ParquetLong => "parquet-long".to_string(),
+            OrderBookStoreKind::ParquetWide => "parquet-wide".to_string(),
+        }
+    }
+}
+
+pub fn construct_file_store(
+    symbol: &str,
+    depth: usize,
+    kind: OrderBookStoreKind,
+) -> Box<dyn OrderBookSink + Send> {
+    match kind {
+        OrderBookStoreKind::NoOps => Box::new(NoOpSink {}),
+        OrderBookStoreKind::ParquetLong => Box::new(ParquetLongSink::new(symbol, 1_000, None)),
+        OrderBookStoreKind::ParquetWide => {
+            Box::new(ParquetWideSink::new(symbol, depth, 1_000, None))
+        }
+    }
 }
