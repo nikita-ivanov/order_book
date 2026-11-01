@@ -29,13 +29,13 @@ impl BookWriter {
                     Err(e) => {
                         println!("Recevied error, finishing store. Error was\n{e:?}");
                         store.finish()?;
-                        break;
+                        return Err(e.into());
                     }
                 };
 
                 match command {
                     WriterCommand::Snapshot(snapshot) => {
-                        store.write(&snapshot).unwrap();
+                        store.write(&snapshot)?;
                     }
                     WriterCommand::Finish => {
                         println!("Recevied fisnih command, finishing store.");
@@ -59,14 +59,11 @@ impl BookWriter {
     }
 
     pub fn shutdown(self) -> Result<()> {
-        self.sender.send(WriterCommand::Finish)?;
+        let _ = self.sender.send(WriterCommand::Finish);
 
         match self.thread.join() {
-            Ok(thread_result) => match thread_result {
-                Ok(()) => Ok(()),
-                Err(e) => Err(e),
-            },
-            Err(_) => Err(anyhow!("failed to join order book sink thread")),
+            Ok(thread_result) => thread_result,
+            Err(_) => Err(anyhow!("writer thread panicked")),
         }
     }
 }

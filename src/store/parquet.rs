@@ -111,6 +111,7 @@ impl BufferArray {
     }
 }
 
+// TODO: make fields nullable where we may inserts nulls (bids and asks)
 impl ParquetSink {
     pub fn new(
         symbol: String,

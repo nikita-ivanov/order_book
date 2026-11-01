@@ -1,9 +1,13 @@
 mod csv;
 use anyhow::Result;
 mod parquet;
+mod parquet_long;
 pub mod writer;
 
-use crate::{book::snapshot::OrderBookSnapshot, store::parquet::ParquetSink};
+use crate::{
+    book::snapshot::OrderBookSnapshot,
+    store::{parquet::ParquetSink, parquet_long::ParquetLongSink},
+};
 
 pub trait OrderBookSink {
     fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()>;
@@ -22,5 +26,6 @@ impl OrderBookSink for NoOpSink {
 }
 
 pub fn construct_file_store(symbol: &str, depth: usize) -> Box<dyn OrderBookSink + Send> {
-    Box::new(ParquetSink::new(symbol.to_string(), depth, 20, None))
+    // Box::new(ParquetSink::new(symbol.to_string(), depth, 20, None))
+    Box::new(ParquetLongSink::new(symbol.to_string(), 20, None))
 }
