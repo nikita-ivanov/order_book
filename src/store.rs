@@ -6,7 +6,7 @@ pub mod writer;
 
 use crate::{
     book::snapshot::OrderBookSnapshot,
-    store::{parquet::ParquetSink, parquet_long::ParquetLongSink},
+    store::{parquet::ParquetWideSink, parquet_long::ParquetLongSink},
 };
 
 pub trait OrderBookSink {

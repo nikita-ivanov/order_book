@@ -14,7 +14,7 @@ use crate::book::snapshot::OrderBookSnapshot;
 use crate::store::OrderBookSink;
 
 #[derive(Debug)]
-pub struct ParquetSink {
+pub struct ParquetWideSink {
     writer: Option<ArrowWriter<File>>,
     schema: Arc<Schema>,
     buffer_size: usize,
@@ -112,13 +112,13 @@ impl BufferArray {
 }
 
 // TODO: make fields nullable where we may inserts nulls (bids and asks)
-impl ParquetSink {
+impl ParquetWideSink {
     pub fn new(
         symbol: String,
         depth: usize,
         buffer_size: usize,
         file_path: Option<PathBuf>,
-    ) -> ParquetSink {
+    ) -> ParquetWideSink {
         let file_path = match file_path {
             Some(path) => {
                 if Path::exists(&path) {
@@ -170,7 +170,7 @@ impl ParquetSink {
 
         let writer = ArrowWriter::try_new(file, schema.clone(), Some(props)).unwrap();
 
-        ParquetSink {
+        ParquetWideSink {
             writer: Some(writer),
             schema,
             buffer_size,
@@ -244,14 +244,14 @@ impl ParquetSink {
     }
 }
 
-impl Drop for ParquetSink {
+impl Drop for ParquetWideSink {
     fn drop(&mut self) {
         println!("dropping parquet store");
         let _ = self.finish();
     }
 }
 
-impl OrderBookSink for ParquetSink {
+impl OrderBookSink for ParquetWideSink {
     fn write(&mut self, ob: &OrderBookSnapshot) -> Result<()> {
         self.buffer.apply(ob);
 
@@ -287,7 +287,7 @@ mod tests {
 
     use crate::{
         book::order_book::{BookUpdate, Level, OrderBook},
-        store::{OrderBookSink, parquet::ParquetSink},
+        store::{OrderBookSink, parquet::ParquetWideSink},
     };
 
     fn get_book_updates() -> [BookUpdate; 2] {
@@ -364,7 +364,7 @@ mod tests {
     fn test_parquet_store() {
         let depth = 3;
         let path = tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
-        let mut store = ParquetSink::new("ETH/USD".to_string(), depth, 5, Some(path.clone()));
+        let mut store = ParquetWideSink::new("ETH/USD".to_string(), depth, 5, Some(path.clone()));
 
         let now = Utc::now().timestamp_nanos_opt().unwrap();
 
